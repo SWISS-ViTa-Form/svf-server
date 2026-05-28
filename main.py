@@ -246,4 +246,4 @@ def send_notification():
         if success:
             return jsonify({'status': 'sent'})
         else:
-            return jsonify({'error': 'Échec envoi ema
+            return jsonify({'error': 'Echec envoi ema
