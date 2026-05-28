@@ -1,6 +1,6 @@
 from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
-import io, os, subprocess, tempfile, base64
+import io, os, subprocess, tempfile, base64, requests
 from datetime import datetime
 from docx import Document
 from docx.shared import Pt, RGBColor
@@ -9,7 +9,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=['https://portail-swissvitaform.netlify.app', 'http://localhost:3000', '*'])
 
 CERT_COMPLET = base64.b64decode(open('/app/cert_complet.b64').read())
 CERT_COMPACT = base64.b64decode(open('/app/cert_compact.b64').read())
@@ -175,3 +175,75 @@ def generate_cert():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
+# ==================== EMAIL ====================
+
+BREVO_API_KEY = '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'
+
+def send_email_formateur(formateur_email, formateur_nom, cours_data):
+    """Envoyer un email de notification au formateur"""
+    if not formateur_email:
+        return False
+    
+    date_f = datetime.strptime(cours_data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
+    
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #c0392b; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">Nouveau cours assigné</p>
+        </div>
+        <div style="padding: 30px; background: #f9f9f9;">
+            <p>Bonjour {formateur_nom},</p>
+            <p>Un nouveau cours vous a été assigné. Voici les informations :</p>
+            <div style="background: white; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #c0392b;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr><td style="padding: 8px 0; color: #888; width: 140px;">Type de cours</td><td style="padding: 8px 0; font-weight: bold;">{cours_data['type_cours']}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Date</td><td style="padding: 8px 0; font-weight: bold;">{date_f}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Horaire</td><td style="padding: 8px 0;">{cours_data['heure_debut']} – {cours_data['heure_fin']}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Lieu</td><td style="padding: 8px 0;">{cours_data['lieu']}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Participants prévus</td><td style="padding: 8px 0;">{cours_data.get('nb_participants_prevus', '—')}</td></tr>
+                </table>
+            </div>
+            {f'<div style="background: #e6f1fb; border-radius: 8px; padding: 16px; margin: 16px 0;"><strong>Notes :</strong><br><pre style="font-family: Arial; white-space: pre-wrap; margin: 8px 0 0 0;">{cours_data["notes"]}</pre></div>' if cours_data.get('notes') else ''}
+            <p>Veuillez confirmer votre présence en vous connectant au portail :</p>
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://portail-swissvitaform.netlify.app" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+            </div>
+        </div>
+        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
+            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
+        </div>
+    </div>
+    """
+    
+    payload = {
+        "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
+        "to": [{"email": formateur_email, "name": formateur_nom}],
+        "subject": f"Cours assigné : {cours_data['type_cours']} — {date_f}",
+        "htmlContent": html_content
+    }
+    
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
+        json=payload
+    )
+    return response.status_code == 201
+
+@app.route('/send-notification', methods=['POST'])
+def send_notification():
+    try:
+        data = request.json
+        formateur_email = data.get('formateur_email', '')
+        formateur_nom = data.get('formateur_nom', '')
+        cours = data.get('cours', {})
+        
+        if not formateur_email:
+            return jsonify({'error': 'Email formateur manquant'}), 400
+        
+        success = send_email_formateur(formateur_email, formateur_nom, cours)
+        if success:
+            return jsonify({'status': 'sent'})
+        else:
+            return jsonify({'error': 'Échec envoi ema
