@@ -229,7 +229,8 @@ def send_email_formateur(formateur_email, formateur_nom, cours_data):
         headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
         json=payload
     )
-    return response.status_code == 201
+    print(f'[BREVO formateur] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
 
 @app.route('/send-notification', methods=['POST'])
 def send_notification():
@@ -242,11 +243,11 @@ def send_notification():
         if not formateur_email:
             return jsonify({'error': 'Email formateur manquant'}), 400
         
-        success = send_email_formateur(formateur_email, formateur_nom, cours)
+        success, detail = send_email_formateur(formateur_email, formateur_nom, cours)
         if success:
             return jsonify({'status': 'sent'})
         else:
-            return jsonify({'error': 'Echec envoi email'}), 500
+            return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -295,7 +296,8 @@ def send_email_client_welcome(client_email, client_nom, login, mot_de_passe):
         headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
         json=payload
     )
-    return response.status_code == 201
+    print(f'[BREVO client welcome] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
 
 
 @app.route('/send-welcome-client', methods=['POST'])
@@ -310,10 +312,10 @@ def send_welcome_client():
         if not client_email:
             return jsonify({'error': 'Email client manquant'}), 400
 
-        success = send_email_client_welcome(client_email, client_nom, login, mot_de_passe)
+        success, detail = send_email_client_welcome(client_email, client_nom, login, mot_de_passe)
         if success:
             return jsonify({'status': 'sent'})
         else:
-            return jsonify({'error': 'Echec envoi email'}), 500
+            return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
