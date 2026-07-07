@@ -319,3 +319,86 @@ def send_welcome_client():
             return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', '')
+
+
+def send_email_formateur_welcome(formateur_email, formateur_nom, login, mot_de_passe):
+    """Envoyer un email de bienvenue au nouveau formateur avec ses identifiants"""
+    if not formateur_email:
+        return False, 'Email manquant'
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #c0392b; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">Bienvenue</p>
+        </div>
+        <div style="padding: 30px; background: #f9f9f9;">
+            <p>Bonjour {formateur_nom},</p>
+            <p>Bienvenue chez Swiss ViTa Form ! Un accès au portail formateur a été créé pour vous.</p>
+            <p>Voici vos identifiants de connexion :</p>
+            <div style="background: white; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #c0392b;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr><td style="padding: 8px 0; color: #888; width: 140px;">Identifiant</td><td style="padding: 8px 0; font-weight: bold;">{login}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Mot de passe</td><td style="padding: 8px 0; font-weight: bold;">{mot_de_passe}</td></tr>
+                </table>
+            </div>
+            <p>Vous pouvez vous connecter dès maintenant pour consulter vos cours assignés :</p>
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://client-svf.netlify.app" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+            </div>
+        </div>
+        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
+            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
+        </div>
+    </div>
+    """
+
+    payload = {
+        "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
+        "to": [{"email": formateur_email, "name": formateur_nom}],
+        "subject": "Bienvenue chez Swiss ViTa Form — vos identifiants",
+        "htmlContent": html_content
+    }
+
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
+        json=payload
+    )
+    print(f'[BREVO formateur welcome] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
+
+
+@app.route('/webhook-new-formateur', methods=['POST'])
+def webhook_new_formateur():
+    try:
+        # Vérification du secret partagé (header configuré côté Supabase)
+        if WEBHOOK_SECRET:
+            incoming_secret = request.headers.get('X-Webhook-Secret', '')
+            if incoming_secret != WEBHOOK_SECRET:
+                return jsonify({'error': 'Non autorisé'}), 401
+
+        data = request.json or {}
+        # Supabase envoie {"type":"INSERT","table":"formateurs","record":{...}}
+        record = data.get('record', data)
+
+        formateur_email = record.get('email', '')
+        prenom = record.get('prenom', '')
+        nom = record.get('nom', '')
+        formateur_nom = f'{prenom} {nom}'.strip()
+        login = record.get('login', '')
+        mot_de_passe = record.get('mot_de_passe', '')
+
+        if not formateur_email:
+            return jsonify({'error': 'Email formateur manquant dans le webhook'}), 400
+
+        success, detail = send_email_formateur_welcome(formateur_email, formateur_nom, login, mot_de_passe)
+        if success:
+            return jsonify({'status': 'sent'})
+        else:
+            return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
