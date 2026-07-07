@@ -41,7 +41,6 @@ def fill_complet(data):
     civ = 'Madame' if data['civilite'] == 'F' else 'Monsieur'
     nom_complet = f"{data['prenom']} {data['nom']}"
     date_cours = datetime.strptime(data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
-    date_sig = datetime.today().strftime('%d.%m.%Y')
 
     # Para 8 = civilité (vide dans complet)
     para8 = doc.paragraphs[8]
@@ -66,7 +65,7 @@ def fill_complet(data):
 
     # Table row 0
     table = doc.tables[0]
-    _fill_table(table, date_sig, data['formateur'])
+    _fill_table(table, data['formateur'], data.get('formateur2'))
 
     out = io.BytesIO()
     doc.save(out)
@@ -77,7 +76,6 @@ def fill_compact(data):
     civ = 'Madame' if data['civilite'] == 'F' else 'Monsieur'
     nom_complet = f"{data['prenom']} {data['nom']}"
     date_cours = datetime.strptime(data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
-    date_sig = datetime.today().strftime('%d.%m.%Y')
 
     # Para 5 = "Monsieur/Madame" → remplacer par civilité
     para5 = doc.paragraphs[5]
@@ -100,20 +98,22 @@ def fill_compact(data):
 
     # Table row 0
     table = doc.tables[0]
-    _fill_table(table, date_sig, data['formateur'])
+    _fill_table(table, data['formateur'], data.get('formateur2'))
 
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
 
-def _fill_table(table, date_sig, formateur):
-    # Row 0 cell 0 = date signature
-    cell_date = table.rows[0].cells[0]
-    for para in cell_date.paragraphs:
+def _fill_table(table, formateur, formateur2=None):
+    # Row 0 cell 0 = 2e instructeur (si présent), sinon vide
+    cell_left = table.rows[0].cells[0]
+    for para in cell_left.paragraphs:
         clear_para(para)
-    p = cell_date.paragraphs[0]
-    set_center(p)
-    add_run(p, date_sig, 11, italic=True, color=(0xC0, 0x39, 0x2B))
+    if formateur2:
+        p = cell_left.paragraphs[0]
+        set_center(p)
+        r0 = add_run(p, formateur2, 13, italic=True, color=(0xC0, 0x39, 0x2B))
+        r0.font.name = 'Brush Script MT'
 
     # Row 0 cell 2 = formateur
     cell_sign = table.rows[0].cells[2]
