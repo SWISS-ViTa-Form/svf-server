@@ -402,3 +402,25 @@ def webhook_new_formateur():
             return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/send-welcome-formateur', methods=['POST'])
+def send_welcome_formateur_manual():
+    """Renvoi manuel de l'email de bienvenue depuis le portail admin (pour les formateurs déjà existants)"""
+    try:
+        data = request.json or {}
+        formateur_email = data.get('formateur_email', '')
+        formateur_nom = data.get('formateur_nom', '')
+        login = data.get('login', '')
+        mot_de_passe = data.get('mot_de_passe', '')
+
+        if not formateur_email:
+            return jsonify({'error': 'Email formateur manquant'}), 400
+
+        success, detail = send_email_formateur_welcome(formateur_email, formateur_nom, login, mot_de_passe)
+        if success:
+            return jsonify({'status': 'sent'})
+        else:
+            return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
