@@ -9,7 +9,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 app = Flask(__name__)
-CORS(app, origins=['https://portail-swissvitaform.netlify.app', 'http://localhost:3000', '*'])
+CORS(app, origins=['https://portail.swissvf.ch', 'http://localhost:3000', '*'])
 
 CERT_COMPLET = base64.b64decode(open('/app/cert_complet.b64').read())
 CERT_COMPACT = base64.b64decode(open('/app/cert_compact.b64').read())
@@ -208,7 +208,7 @@ def send_email_formateur(formateur_email, formateur_nom, cours_data):
             {f'<div style="background: #e6f1fb; border-radius: 8px; padding: 16px; margin: 16px 0;"><strong>Notes :</strong><br><pre style="font-family: Arial; white-space: pre-wrap; margin: 8px 0 0 0;">{cours_data["notes"]}</pre></div>' if cours_data.get('notes') else ''}
             <p>Veuillez confirmer votre présence en vous connectant au portail :</p>
             <div style="text-align: center; margin: 24px 0;">
-                <a href="https://portail-swissvitaform.netlify.app" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
             </div>
         </div>
         <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
@@ -275,7 +275,7 @@ def send_email_client_welcome(client_email, client_nom, login, mot_de_passe):
             </div>
             <p>Vous pouvez vous connecter dès maintenant pour consulter vos cours à venir et télécharger les certificats de vos participants :</p>
             <div style="text-align: center; margin: 24px 0;">
-                <a href="https://client-svf.netlify.app" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
             </div>
         </div>
         <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
@@ -347,7 +347,7 @@ def send_email_formateur_welcome(formateur_email, formateur_nom, login, mot_de_p
             </div>
             <p>Vous pouvez vous connecter dès maintenant pour consulter vos cours assignés :</p>
             <div style="text-align: center; margin: 24px 0;">
-                <a href="https://client-svf.netlify.app" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
             </div>
         </div>
         <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
