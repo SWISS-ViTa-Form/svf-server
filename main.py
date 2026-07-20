@@ -172,9 +172,6 @@ def generate_cert():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
 
 # ==================== EMAIL ====================
 
@@ -424,3 +421,133 @@ def send_welcome_formateur_manual():
             return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def send_email_signalement(sig_type, description, formateur_nom):
+    """Envoyer un email pour un signalement (matériel) ou une idée"""
+    label = 'Idée' if sig_type == 'idee' else 'Problème signalé'
+    emoji = '💡' if sig_type == 'idee' else '⚠️'
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #c0392b; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">{emoji} {label}</p>
+        </div>
+        <div style="padding: 30px; background: #f9f9f9;">
+            <p>Formateur : <strong>{formateur_nom or '—'}</strong></p>
+            <div style="background: white; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #c0392b;">
+                <pre style="font-family: Arial; white-space: pre-wrap; margin: 0;">{description}</pre>
+            </div>
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Ouvrir le portail admin</a>
+            </div>
+        </div>
+        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
+            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
+        </div>
+    </div>
+    """
+
+    payload = {
+        "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
+        "to": [{"email": "info@swissvf.ch", "name": "Vincent"}],
+        "subject": f"{emoji} {label} — {formateur_nom or 'Formateur'}",
+        "htmlContent": html_content
+    }
+
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
+        json=payload
+    )
+    print(f'[BREVO signalement] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
+
+
+@app.route('/send-signalement', methods=['POST'])
+def send_signalement():
+    try:
+        data = request.json or {}
+        sig_type = data.get('type', 'materiel')
+        description = data.get('description', '')
+        formateur_nom = data.get('formateur_nom', '')
+
+        if not description:
+            return jsonify({'error': 'Description manquante'}), 400
+
+        success, detail = send_email_signalement(sig_type, description, formateur_nom)
+        if success:
+            return jsonify({'status': 'sent'})
+        else:
+            return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def send_email_demande_formation(client_nom, type_cours, nb_participants, date_souhaitee, message):
+    """Envoyer un email pour une demande de formation depuis le portail client"""
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #c0392b; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">📋 Nouvelle demande de formation</p>
+        </div>
+        <div style="padding: 30px; background: #f9f9f9;">
+            <div style="background: white; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #c0392b;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr><td style="padding: 8px 0; color: #888; width: 160px;">Client</td><td style="padding: 8px 0; font-weight: bold;">{client_nom or '—'}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Type de cours</td><td style="padding: 8px 0;">{type_cours or '—'}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Participants estimés</td><td style="padding: 8px 0;">{nb_participants or '—'}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Date souhaitée</td><td style="padding: 8px 0;">{date_souhaitee or '—'}</td></tr>
+                </table>
+            </div>
+            {f'<div style="background: #e6f1fb; border-radius: 8px; padding: 16px; margin: 16px 0;"><strong>Message :</strong><br>{message}</div>' if message else ''}
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Ouvrir le portail admin</a>
+            </div>
+        </div>
+        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
+            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
+        </div>
+    </div>
+    """
+
+    payload = {
+        "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
+        "to": [{"email": "info@swissvf.ch", "name": "Vincent"}],
+        "subject": f"📋 Demande de formation — {client_nom or ''}",
+        "htmlContent": html_content
+    }
+
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
+        json=payload
+    )
+    print(f'[BREVO demande formation] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
+
+
+@app.route('/send-demande-formation', methods=['POST'])
+def send_demande_formation():
+    try:
+        data = request.json or {}
+        client_nom = data.get('client_nom', '')
+        type_cours = data.get('type_cours', '')
+        nb_participants = data.get('nb_participants', '')
+        date_souhaitee = data.get('date_souhaitee', '')
+        message = data.get('message', '')
+
+        success, detail = send_email_demande_formation(client_nom, type_cours, nb_participants, date_souhaitee, message)
+        if success:
+            return jsonify({'status': 'sent'})
+        else:
+            return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
