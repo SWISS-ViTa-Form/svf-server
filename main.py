@@ -7,12 +7,14 @@ from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+import openpyxl
 
 app = Flask(__name__)
 CORS(app, origins=['https://portail.swissvf.ch', 'http://localhost:3000', '*'])
 
 CERT_COMPLET = base64.b64decode(open('/app/cert_complet.b64').read())
 CERT_COMPACT = base64.b64decode(open('/app/cert_compact.b64').read())
+FICHE_PRESENCE = base64.b64decode(open('/app/fiche_presence.b64').read())
 
 def clear_para(para):
     for run in para.runs:
@@ -129,6 +131,26 @@ def _fill_table(table, formateur, formateur2=None):
         for para in table.rows[1].cells[ci].paragraphs:
             clear_para(para)
 
+def fill_fiche_presence(data):
+    wb = openpyxl.load_workbook(io.BytesIO(FICHE_PRESENCE))
+    ws = wb.active
+
+    societe = data.get('societe', '') or ''
+    adresse = data.get('adresse', '') or ''
+    date_cours = data.get('date_cours', '')
+
+    ws['B3'] = societe
+    ws['B4'] = adresse
+    if date_cours:
+        try:
+            ws['G6'] = datetime.strptime(date_cours, '%Y-%m-%d').strftime('%d.%m.%Y')
+        except ValueError:
+            ws['G6'] = date_cours
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
 def convert_to_pdf(docx_bytes):
     with tempfile.TemporaryDirectory() as tmpdir:
         docx_path = os.path.join(tmpdir, 'cert.docx')
@@ -166,6 +188,23 @@ def generate_cert():
         return send_file(
             io.BytesIO(pdf_bytes),
             mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/generate-fiche-presence', methods=['POST'])
+def generate_fiche_presence():
+    try:
+        data = request.json or {}
+        xlsx_bytes = fill_fiche_presence(data)
+        date_cours = data.get('date_cours', '')
+        filename = f"Fiche_presence_{date_cours}.xlsx" if date_cours else "Fiche_presence.xlsx"
+        return send_file(
+            io.BytesIO(xlsx_bytes),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
             download_name=filename
         )
