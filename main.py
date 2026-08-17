@@ -440,6 +440,157 @@ def webhook_new_formateur():
         return jsonify({'error': str(e)}), 500
 
 
+def send_email_nouveau_cours_disponible(formateur_email, formateur_nom, cours_data):
+    """Informe un formateur/une formatrice qu'un nouveau cours est ouvert aux candidatures"""
+    if not formateur_email:
+        return False, 'email manquant'
+
+    date_f = datetime.strptime(cours_data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #c0392b; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">Nouveau cours disponible</p>
+        </div>
+        <div style="padding: 30px; background: #f9f9f9;">
+            <p>Bonjour {formateur_nom},</p>
+            <p>Un nouveau cours est ouvert aux inscriptions des formateurs et formatrices. Voici les informations :</p>
+            <div style="background: white; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #c0392b;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr><td style="padding: 8px 0; color: #888; width: 140px;">Type de cours</td><td style="padding: 8px 0; font-weight: bold;">{cours_data['type_cours']}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Date</td><td style="padding: 8px 0; font-weight: bold;">{date_f}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Horaire</td><td style="padding: 8px 0;">{cours_data.get('heure_debut', '—')} – {cours_data.get('heure_fin', '—')}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Lieu</td><td style="padding: 8px 0;">{cours_data.get('lieu', '—')}</td></tr>
+                </table>
+            </div>
+            <p>Si vous êtes disponible et intéressé(e), vous pouvez vous porter candidat(e) directement depuis le portail. Votre demande sera ensuite validée par l'administration.</p>
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+            </div>
+        </div>
+        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
+            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
+        </div>
+    </div>
+    """
+
+    payload = {
+        "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
+        "to": [{"email": formateur_email, "name": formateur_nom}],
+        "subject": f"Nouveau cours disponible : {cours_data['type_cours']} — {date_f}",
+        "htmlContent": html_content
+    }
+
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
+        json=payload
+    )
+    print(f'[BREVO nouveau cours disponible] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
+
+
+@app.route('/send-nouveau-cours-formateurs', methods=['POST'])
+def send_nouveau_cours_formateurs():
+    """Envoie un email groupé à une liste de formateurs/formatrices pour un cours nouvellement visible"""
+    try:
+        data = request.json or {}
+        formateurs = data.get('formateurs', [])
+        cours = data.get('cours', {})
+
+        if not formateurs:
+            return jsonify({'error': 'Liste de formateurs vide'}), 400
+        if not cours.get('date_cours') or not cours.get('type_cours'):
+            return jsonify({'error': 'Données du cours incomplètes'}), 400
+
+        sent = 0
+        errors = []
+        for f in formateurs:
+            email = f.get('email', '')
+            nom = f.get('nom', '')
+            if not email:
+                continue
+            success, detail = send_email_nouveau_cours_disponible(email, nom, cours)
+            if success:
+                sent += 1
+            else:
+                errors.append({'email': email, 'detail': detail})
+
+        return jsonify({'status': 'done', 'sent': sent, 'total': len(formateurs), 'errors': errors})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def send_email_candidature_refusee(formateur_email, formateur_nom, cours_data):
+    """Informe un formateur/une formatrice que sa candidature n'a pas été retenue"""
+    if not formateur_email:
+        return False, 'email manquant'
+
+    date_f = datetime.strptime(cours_data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #c0392b; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">Réponse à votre candidature</p>
+        </div>
+        <div style="padding: 30px; background: #f9f9f9;">
+            <p>Bonjour {formateur_nom},</p>
+            <p>Merci pour votre intérêt pour le cours ci-dessous. Malheureusement, votre candidature n'a pas pu être retenue cette fois-ci :</p>
+            <div style="background: white; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #c0392b;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr><td style="padding: 8px 0; color: #888; width: 140px;">Type de cours</td><td style="padding: 8px 0; font-weight: bold;">{cours_data['type_cours']}</td></tr>
+                    <tr><td style="padding: 8px 0; color: #888;">Date</td><td style="padding: 8px 0; font-weight: bold;">{date_f}</td></tr>
+                </table>
+            </div>
+            <p>N'hésitez pas à consulter le portail régulièrement pour découvrir d'autres cours disponibles.</p>
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+            </div>
+        </div>
+        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
+            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
+        </div>
+    </div>
+    """
+
+    payload = {
+        "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
+        "to": [{"email": formateur_email, "name": formateur_nom}],
+        "subject": f"Candidature non retenue : {cours_data['type_cours']} — {date_f}",
+        "htmlContent": html_content
+    }
+
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
+        json=payload
+    )
+    print(f'[BREVO candidature refusee] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
+
+
+@app.route('/send-candidature-refusee', methods=['POST'])
+def send_candidature_refusee():
+    try:
+        data = request.json or {}
+        formateur_email = data.get('formateur_email', '')
+        formateur_nom = data.get('formateur_nom', '')
+        cours = data.get('cours', {})
+
+        if not formateur_email:
+            return jsonify({'error': 'Email formateur manquant'}), 400
+
+        success, detail = send_email_candidature_refusee(formateur_email, formateur_nom, cours)
+        if success:
+            return jsonify({'status': 'sent'})
+        else:
+            return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/send-welcome-formateur', methods=['POST'])
 def send_welcome_formateur_manual():
     """Renvoi manuel de l'email de bienvenue depuis le portail admin (pour les formateurs déjà existants)"""
