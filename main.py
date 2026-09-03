@@ -288,6 +288,98 @@ def send_notification():
         return jsonify({'error': str(e)}), 500
 
 
+def send_email_modification_cours(formateur_email, formateur_nom, cours_data, changements):
+    """Informe un formateur/une formatrice d'un changement de date/heure/lieu sur un cours déjà assigné.
+    changements : liste de dicts {label, ancien, nouveau}"""
+    if not formateur_email:
+        return False, 'email manquant'
+
+    date_f = datetime.strptime(cours_data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
+
+    lignes_changements = ''.join([
+        f"""<tr>
+            <td style="padding: 8px 0; color: #888; width: 140px;">{c['label']}</td>
+            <td style="padding: 8px 0;"><span style="text-decoration: line-through; color: #a32d2d;">{c['ancien']}</span> → <span style="font-weight: bold; color: #3b6d11;">{c['nouveau']}</span></td>
+        </tr>"""
+        for c in changements
+    ])
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #c0392b; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">Modification d'un cours assigné</p>
+        </div>
+        <div style="padding: 30px; background: #f9f9f9;">
+            <p>Bonjour {formateur_nom},</p>
+            <p>Un cours qui vous est assigné a été modifié :</p>
+            <div style="background: white; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #c0392b;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr><td style="padding: 8px 0; color: #888; width: 140px;">Type de cours</td><td style="padding: 8px 0; font-weight: bold;">{cours_data['type_cours']}</td></tr>
+                    {lignes_changements}
+                </table>
+            </div>
+            <p>Aucune nouvelle confirmation de votre part n'est nécessaire — cette information est juste à titre indicatif.</p>
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+            </div>
+        </div>
+        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
+            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
+        </div>
+    </div>
+    """
+
+    payload = {
+        "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
+        "to": [{"email": formateur_email, "name": formateur_nom}],
+        "subject": f"Cours modifié : {cours_data['type_cours']} — {date_f}",
+        "htmlContent": html_content
+    }
+
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
+        json=payload
+    )
+    print(f'[BREVO modification cours] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
+
+
+@app.route('/send-modification-cours', methods=['POST'])
+def send_modification_cours():
+    """Envoie un email groupé aux formateurs/formatrices déjà assignés à un cours modifié (date/heure/lieu)"""
+    try:
+        data = request.json or {}
+        formateurs = data.get('formateurs', [])
+        cours = data.get('cours', {})
+        changements = data.get('changements', [])
+
+        if not formateurs:
+            return jsonify({'error': 'Liste de formateurs vide'}), 400
+        if not cours.get('date_cours') or not cours.get('type_cours'):
+            return jsonify({'error': 'Données du cours incomplètes'}), 400
+        if not changements:
+            return jsonify({'error': 'Aucun changement fourni'}), 400
+
+        sent = 0
+        errors = []
+        for f in formateurs:
+            email = f.get('email', '')
+            nom = f.get('nom', '')
+            if not email:
+                continue
+            success, detail = send_email_modification_cours(email, nom, cours, changements)
+            if success:
+                sent += 1
+            else:
+                errors.append({'email': email, 'detail': detail})
+
+        return jsonify({'status': 'done', 'sent': sent, 'total': len(formateurs), 'errors': errors})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 def send_email_client_welcome(client_email, client_nom, login, mot_de_passe):
     """Envoyer un email de bienvenue au nouveau client avec ses identifiants"""
     if not client_email:
