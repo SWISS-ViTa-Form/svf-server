@@ -15,6 +15,8 @@ CORS(app, origins=['https://portail.swissvf.ch', 'http://localhost:3000', '*'])
 CERT_COMPLET = base64.b64decode(open('/app/cert_complet.b64').read())
 CERT_COMPACT = base64.b64decode(open('/app/cert_compact.b64').read())
 FICHE_PRESENCE = base64.b64decode(open('/app/fiche_presence.b64').read())
+FICHE_SALAIRE = base64.b64decode(open('/app/fiche_salaire.b64').read())
+ORS_API_KEY = os.environ.get('ORS_API_KEY', '')
 
 def clear_para(para):
     for run in para.runs:
@@ -165,6 +167,63 @@ def convert_to_pdf(docx_bytes):
         pdf_path = docx_path.replace('.docx', '.pdf')
         with open(pdf_path, 'rb') as f:
             return f.read()
+
+def convert_xlsx_to_pdf(xlsx_bytes):
+    """Identique a convert_to_pdf mais pour un fichier .xlsx (fiche de salaire)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        xlsx_path = os.path.join(tmpdir, 'fiche.xlsx')
+        with open(xlsx_path, 'wb') as f:
+            f.write(xlsx_bytes)
+        result = subprocess.run(
+            ['libreoffice', '--headless', '--convert-to', 'pdf', '--outdir', tmpdir, xlsx_path],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            raise Exception(f'LibreOffice error: {result.stderr}')
+        pdf_path = xlsx_path.replace('.xlsx', '.pdf')
+        with open(pdf_path, 'rb') as f:
+            return f.read()
+
+
+MOIS_LABELS = {
+    1: 'Janvier', 2: 'Fevrier', 3: 'Mars', 4: 'Avril', 5: 'Mai', 6: 'Juin',
+    7: 'Juillet', 8: 'Aout', 9: 'Septembre', 10: 'Octobre', 11: 'Novembre', 12: 'Decembre',
+    13: 'Gratification'
+}
+
+
+def fill_fiche_salaire(data):
+    wb = openpyxl.load_workbook(io.BytesIO(FICHE_SALAIRE))
+    ws = wb['fiche']
+
+    civ = 'Madame' if data.get('civilite') == 'F' else 'Monsieur'
+    date_emission = datetime.now().strftime('%d.%m.%Y')
+
+    ws['D1'] = f'Yverdon-les-Bains le {date_emission}'
+    ws['D9'] = civ
+    ws['D10'] = data.get('nom_complet', '')
+    ws['D11'] = data.get('adresse', '')
+    ws['D12'] = data.get('npa_localite', '')
+    ws['B15'] = data.get('avs_no', '')
+    ws['B16'] = data.get('date_naissance', '')
+    ws['B19'] = MOIS_LABELS.get(int(data.get('mois', 1)), '')
+    ws['B20'] = f"Annee {data.get('annee', '')}"
+
+    ws['B25'] = data.get('taux_horaire', 0)
+    ws['C25'] = data.get('heures_total', 0)
+    ws['E27'] = data.get('forfaits_ponctuels_montant', 0)
+
+    ws['C39'] = data.get('repas_nombre', 0)
+    ws['C40'] = data.get('km_total', 0)
+    ws['E40'] = data.get('km_montant', 0)
+    ws['C41'] = data.get('materiel_nombre', 0)
+
+    ws['B44'] = data.get('recap_cours', '')
+
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -822,6 +881,161 @@ def send_demande_formation():
         message = data.get('message', '')
 
         success, detail = send_email_demande_formation(client_nom, type_cours, nb_participants, date_souhaitee, message)
+        if success:
+            return jsonify({'status': 'sent'})
+        else:
+            return jsonify({'error': 'Echec envoi email', 'detail': detail}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== KM / DISTANCE ====================
+
+def bareme_km(km_aller_retour, params):
+    if km_aller_retour <= 30:
+        return params.get('km_bareme_0_30', 21)
+    elif km_aller_retour <= 60:
+        return params.get('km_bareme_30_60', 45)
+    elif km_aller_retour <= 100:
+        return params.get('km_bareme_60_100', 70)
+    else:
+        return params.get('km_bareme_plus_100', 90)
+
+
+def geocode_ors(address):
+    resp = requests.get(
+        'https://api.openrouteservice.org/geocode/search',
+        params={'api_key': ORS_API_KEY, 'text': address, 'size': 1, 'boundary.country': 'CH'},
+        timeout=15
+    )
+    resp.raise_for_status()
+    features = resp.json().get('features', [])
+    if not features:
+        raise Exception(f'Adresse introuvable: {address}')
+    lon, lat = features[0]['geometry']['coordinates']
+    return lon, lat
+
+
+@app.route('/calculate-distance-km', methods=['POST'])
+def calculate_distance_km():
+    try:
+        data = request.json or {}
+        origin = data.get('origin_address')
+        destination = data.get('destination_address')
+        params = data.get('parametres_rh', {})
+
+        if not origin or not destination:
+            return jsonify({'error': 'Adresse manquante'}), 400
+        if not ORS_API_KEY:
+            return jsonify({'error': 'ORS_API_KEY non configuree sur le serveur'}), 500
+
+        lon1, lat1 = geocode_ors(origin)
+        lon2, lat2 = geocode_ors(destination)
+
+        resp = requests.post(
+            'https://api.openrouteservice.org/v2/directions/driving-car',
+            headers={'Authorization': ORS_API_KEY, 'Content-Type': 'application/json'},
+            json={'coordinates': [[lon1, lat1], [lon2, lat2]]},
+            timeout=15
+        )
+        resp.raise_for_status()
+        route = resp.json()
+        distance_m = route['routes'][0]['summary']['distance']
+        km_aller_simple = distance_m / 1000
+        km_aller_retour = round(km_aller_simple * 2, 1)
+
+        montant = bareme_km(km_aller_retour, params)
+
+        return jsonify({
+            'km_aller_simple': round(km_aller_simple, 1),
+            'km_aller_retour': km_aller_retour,
+            'montant': montant
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== FICHE DE SALAIRE ====================
+
+@app.route('/generate-fiche-salaire', methods=['POST'])
+def generate_fiche_salaire():
+    try:
+        data = request.json or {}
+        for field in ['nom_complet', 'mois', 'annee', 'taux_horaire']:
+            if field not in data:
+                return jsonify({'error': f'Champ manquant: {field}'}), 400
+
+        xlsx_bytes = fill_fiche_salaire(data)
+        pdf_bytes = convert_xlsx_to_pdf(xlsx_bytes)
+
+        mois_label = MOIS_LABELS.get(int(data['mois']), data['mois'])
+        filename = f"Fiche_salaire_{mois_label}_{data['annee']}_{data['nom_complet'].replace(' ', '_')}.pdf"
+
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def send_email_fiche_salaire(formateur_email, formateur_nom, mois_label, annee, pdf_base64, filename):
+    if not formateur_email:
+        return False, 'email manquant'
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #c0392b; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
+            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">Fiche de salaire</p>
+        </div>
+        <div style="padding: 30px; background: #f9f9f9;">
+            <p>Bonjour {formateur_nom},</p>
+            <p>Veuillez trouver ci-joint votre fiche de salaire pour <strong>{mois_label} {annee}</strong>.</p>
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Acceder au portail</a>
+            </div>
+        </div>
+        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
+            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
+        </div>
+    </div>
+    """
+
+    payload = {
+        "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
+        "to": [{"email": formateur_email, "name": formateur_nom}],
+        "subject": f"Fiche de salaire — {mois_label} {annee}",
+        "htmlContent": html_content,
+        "attachment": [{"content": pdf_base64, "name": filename}]
+    }
+
+    response = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        headers={'api-key': BREVO_API_KEY, 'Content-Type': 'application/json'},
+        json=payload
+    )
+    print(f'[BREVO fiche salaire] status={response.status_code} body={response.text}')
+    return response.status_code == 201, response.text
+
+
+@app.route('/send-fiche-salaire', methods=['POST'])
+def send_fiche_salaire():
+    try:
+        data = request.json or {}
+        formateur_email = data.get('formateur_email', '')
+        formateur_nom = data.get('formateur_nom', '')
+        mois_label = data.get('mois_label', '')
+        annee = data.get('annee', '')
+        pdf_base64 = data.get('pdf_base64', '')
+        filename = data.get('filename', 'Fiche_salaire.pdf')
+
+        if not formateur_email or not pdf_base64:
+            return jsonify({'error': 'Email ou PDF manquant'}), 400
+
+        success, detail = send_email_fiche_salaire(formateur_email, formateur_nom, mois_label, annee, pdf_base64, filename)
         if success:
             return jsonify({'status': 'sent'})
         else:
