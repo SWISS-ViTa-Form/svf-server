@@ -916,7 +916,12 @@ def bareme_km(km_aller_retour, params):
 def geocode_ors(address):
     resp = requests.get(
         'https://api.openrouteservice.org/geocode/search',
-        params={'api_key': ORS_API_KEY, 'text': address, 'size': 1, 'boundary.country': 'CH'},
+        params={
+            'api_key': ORS_API_KEY, 'text': address, 'size': 1,
+            'boundary.country': 'CH',
+            'layers': 'address,street,venue',  # évite de matcher une région/rivière large (ex: "Orbe" le cours d'eau)
+            'focus.point.lon': 6.9, 'focus.point.lat': 46.7  # biais vers le canton de Vaud
+        },
         timeout=15
     )
     resp.raise_for_status()
@@ -924,7 +929,8 @@ def geocode_ors(address):
     if not features:
         raise Exception(f'Adresse introuvable: {address}')
     lon, lat = features[0]['geometry']['coordinates']
-    return lon, lat
+    label = features[0]['properties'].get('label', address)
+    return lon, lat, label
 
 
 @app.route('/calculate-distance-km', methods=['POST'])
@@ -940,8 +946,8 @@ def calculate_distance_km():
         if not ORS_API_KEY:
             return jsonify({'error': 'ORS_API_KEY non configuree sur le serveur'}), 500
 
-        lon1, lat1 = geocode_ors(origin)
-        lon2, lat2 = geocode_ors(destination)
+        lon1, lat1, label1 = geocode_ors(origin)
+        lon2, lat2, label2 = geocode_ors(destination)
 
         resp = requests.post(
             'https://api.openrouteservice.org/v2/directions/driving-car',
@@ -960,7 +966,9 @@ def calculate_distance_km():
         return jsonify({
             'km_aller_simple': round(km_aller_simple, 1),
             'km_aller_retour': km_aller_retour,
-            'montant': montant
+            'montant': montant,
+            'origine_resolue': label1,
+            'destination_resolue': label2
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
