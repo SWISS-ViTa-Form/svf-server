@@ -218,7 +218,18 @@ def fill_fiche_salaire(data):
     ws['C41'] = data.get('km_total', 0)
     ws['E41'] = data.get('km_montant', 0)
 
-    ws['B44'] = data.get('recap_cours', '')
+    ws['B45'] = ''
+
+    # Récap des cours : une ligne par cours (au lieu d'un seul texte concaténé
+    # qui débordait de la page). On insère des lignes supplémentaires si besoin
+    # pour ne jamais rien couper, quel que soit le nombre de cours du mois.
+    lignes = data.get('recap_lignes') or ([data['recap_cours']] if data.get('recap_cours') else [])
+    if lignes:
+        ws['B45'] = lignes[0]
+        if len(lignes) > 1:
+            ws.insert_rows(46, len(lignes) - 1)
+            for i, ligne in enumerate(lignes[1:], start=46):
+                ws[f'B{i}'] = ligne
 
     out = io.BytesIO()
     wb.save(out)
@@ -935,7 +946,7 @@ def calculate_distance_km():
         resp = requests.post(
             'https://api.openrouteservice.org/v2/directions/driving-car',
             headers={'Authorization': ORS_API_KEY, 'Content-Type': 'application/json'},
-            json={'coordinates': [[lon1, lat1], [lon2, lat2]]},
+            json={'coordinates': [[lon1, lat1], [lon2, lat2]], 'preference': 'shortest'},
             timeout=15
         )
         resp.raise_for_status()
