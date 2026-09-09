@@ -212,11 +212,11 @@ def fill_fiche_salaire(data):
     ws['B25'] = data.get('taux_horaire', 0)
     ws['C25'] = data.get('heures_total', 0)
     ws['E27'] = data.get('forfaits_ponctuels_montant', 0)
+    ws['C28'] = data.get('materiel_nombre', 0)
 
-    ws['C39'] = data.get('repas_nombre', 0)
-    ws['C40'] = data.get('km_total', 0)
-    ws['E40'] = data.get('km_montant', 0)
-    ws['C41'] = data.get('materiel_nombre', 0)
+    ws['C40'] = data.get('repas_nombre', 0)
+    ws['C41'] = data.get('km_total', 0)
+    ws['E41'] = data.get('km_montant', 0)
 
     ws['B44'] = data.get('recap_cours', '')
 
