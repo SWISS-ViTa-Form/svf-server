@@ -186,8 +186,8 @@ def convert_xlsx_to_pdf(xlsx_bytes):
 
 
 MOIS_LABELS = {
-    1: 'Janvier', 2: 'Fevrier', 3: 'Mars', 4: 'Avril', 5: 'Mai', 6: 'Juin',
-    7: 'Juillet', 8: 'Aout', 9: 'Septembre', 10: 'Octobre', 11: 'Novembre', 12: 'Decembre',
+    1: 'Janvier', 2: 'Février', 3: 'Mars', 4: 'Avril', 5: 'Mai', 6: 'Juin',
+    7: 'Juillet', 8: 'Août', 9: 'Septembre', 10: 'Octobre', 11: 'Novembre', 12: 'Décembre',
     13: 'Gratification'
 }
 
@@ -207,7 +207,7 @@ def fill_fiche_salaire(data):
     ws['B15'] = data.get('avs_no', '')
     ws['B16'] = data.get('date_naissance', '')
     ws['B19'] = MOIS_LABELS.get(int(data.get('mois', 1)), '')
-    ws['B20'] = f"Annee {data.get('annee', '')}"
+    ws['B20'] = f"Année {data.get('annee', '')}"
 
     ws['B25'] = data.get('taux_horaire', 0)
     ws['C25'] = data.get('heures_total', 0)
