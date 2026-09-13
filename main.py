@@ -42,7 +42,7 @@ def add_run(para, text, size_pt, bold=False, italic=False, color=None):
 
 def fill_complet(data):
     doc = Document(io.BytesIO(CERT_COMPLET))
-    civ = 'Madame' if data['civilite'] == 'F' else 'Monsieur'
+    civ = 'Madame' if normalize_civilite(data['civilite']) else 'Monsieur'
     nom_complet = f"{data['prenom']} {data['nom']}"
     date_cours = datetime.strptime(data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
 
@@ -77,7 +77,7 @@ def fill_complet(data):
 
 def fill_compact(data):
     doc = Document(io.BytesIO(CERT_COMPACT))
-    civ = 'Madame' if data['civilite'] == 'F' else 'Monsieur'
+    civ = 'Madame' if normalize_civilite(data['civilite']) else 'Monsieur'
     nom_complet = f"{data['prenom']} {data['nom']}"
     date_cours = datetime.strptime(data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
 
@@ -192,11 +192,18 @@ MOIS_LABELS = {
 }
 
 
+def normalize_civilite(val):
+    """Tolère 'F', 'Madame', 'Femme', 'f', etc. — n'importe quelle valeur
+    commençant par F/f ou contenant 'adame' est traitée comme féminin.
+    Tout le reste (y compris vide/None) est traité comme masculin."""
+    v = str(val or '').strip().lower()
+    return v.startswith('f') or 'adame' in v
+
 def fill_fiche_salaire(data):
     wb = openpyxl.load_workbook(io.BytesIO(FICHE_SALAIRE))
     ws = wb['fiche']
 
-    civ = 'Madame' if data.get('civilite') == 'F' else 'Monsieur'
+    civ = 'Madame' if normalize_civilite(data.get('civilite')) else 'Monsieur'
     date_emission = datetime.now().strftime('%d.%m.%Y')
 
     ws['D1'] = f'Yverdon-les-Bains le {date_emission}'
@@ -218,18 +225,29 @@ def fill_fiche_salaire(data):
     ws['C41'] = data.get('km_total', 0)
     ws['E41'] = data.get('km_montant', 0)
 
+    from copy import copy as _copy_style
+
     ws['B45'] = ''
 
     # Récap des cours : une ligne par cours (au lieu d'un seul texte concaténé
     # qui débordait de la page). On insère des lignes supplémentaires si besoin
     # pour ne jamais rien couper, quel que soit le nombre de cours du mois.
+    # Seul le libellé "Cours donné le :" (colonne A) doit rester en gras — les
+    # valeurs (colonne B) sont explicitement remises en non-gras, car la
+    # cellule B45 du template héritait à tort du gras de la colonne A.
     lignes = data.get('recap_lignes') or ([data['recap_cours']] if data.get('recap_cours') else [])
     if lignes:
         ws['B45'] = lignes[0]
+        b45_font = _copy_style(ws['B45'].font)
+        b45_font.bold = False
+        ws['B45'].font = b45_font
         if len(lignes) > 1:
             ws.insert_rows(46, len(lignes) - 1)
             for i, ligne in enumerate(lignes[1:], start=46):
-                ws[f'B{i}'] = ligne
+                cell = ws[f'B{i}']
+                cell.value = ligne
+                new_font = _copy_style(b45_font)
+                cell.font = new_font
 
     out = io.BytesIO()
     wb.save(out)
