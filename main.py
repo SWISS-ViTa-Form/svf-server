@@ -207,6 +207,10 @@ def fill_fiche_salaire(data):
     ws['B19'] = MOIS_LABELS.get(int(data.get('mois', 1)), '')
     ws['B20'] = f"Année {data.get('annee', '')}"
 
+    iban = (data.get('iban') or '').strip()
+    ws['B48'] = f"IBAN : {iban}" if iban else "IBAN non renseigné dans la fiche formateur"
+
+
     ws['B25'] = data.get('taux_horaire', 0)
     ws['C25'] = data.get('heures_total', 0)
     ws['E27'] = data.get('forfaits_ponctuels_montant', 0)
