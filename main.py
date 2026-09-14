@@ -8,6 +8,9 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 import openpyxl
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from pypdf import PdfReader, PdfWriter
 
 app = Flask(__name__)
 CORS(app, origins=['https://portail.swissvf.ch', 'http://localhost:3000', '*'])
@@ -16,6 +19,7 @@ CERT_COMPLET = base64.b64decode(open('/app/cert_complet.b64').read())
 CERT_COMPACT = base64.b64decode(open('/app/cert_compact.b64').read())
 FICHE_PRESENCE = base64.b64decode(open('/app/fiche_presence.b64').read())
 FICHE_SALAIRE = base64.b64decode(open('/app/fiche_salaire.b64').read())
+LOGO_SVF = base64.b64decode(open('/app/logo_svf.b64').read())
 ORS_API_KEY = os.environ.get('ORS_API_KEY', '')
 
 def clear_para(para):
@@ -183,6 +187,34 @@ def convert_xlsx_to_pdf(xlsx_bytes):
         pdf_path = xlsx_path.replace('.xlsx', '.pdf')
         with open(pdf_path, 'rb') as f:
             return f.read()
+
+def stamp_logo(pdf_bytes, x=57, y=655, width=162, height=76):
+    """Superpose le logo SVF sur la 1ère page d'un PDF, indépendamment de
+    LibreOffice (qui ne restitue pas toujours de façon fiable les images
+    intégrées dans le xlsx source lors de la conversion headless).
+    Coordonnées par défaut calées sur l'emplacement du logo dans le template
+    fiche_salaire (repère bas-gauche, en points, page A4)."""
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    page = reader.pages[0]
+    page_w = float(page.mediabox.width)
+    page_h = float(page.mediabox.height)
+
+    overlay_buf = io.BytesIO()
+    c = canvas.Canvas(overlay_buf, pagesize=(page_w, page_h))
+    c.drawImage(ImageReader(io.BytesIO(LOGO_SVF)), x, y, width=width, height=height,
+                preserveAspectRatio=True, mask='auto')
+    c.save()
+    overlay_buf.seek(0)
+    overlay_page = PdfReader(overlay_buf).pages[0]
+    page.merge_page(overlay_page)
+
+    writer = PdfWriter()
+    writer.add_page(page)
+    for p in reader.pages[1:]:
+        writer.add_page(p)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
 
 
 MOIS_LABELS = {
@@ -1004,6 +1036,7 @@ def generate_fiche_salaire():
 
         xlsx_bytes = fill_fiche_salaire(data)
         pdf_bytes = convert_xlsx_to_pdf(xlsx_bytes)
+        pdf_bytes = stamp_logo(pdf_bytes)
 
         mois_label = MOIS_LABELS.get(int(data['mois']), data['mois'])
         filename = f"Fiche_salaire_{mois_label}_{data['annee']}_{data['nom_complet'].replace(' ', '_')}.pdf"
