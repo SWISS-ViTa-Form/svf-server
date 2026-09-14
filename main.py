@@ -44,98 +44,57 @@ def add_run(para, text, size_pt, bold=False, italic=False, color=None):
         run.font.color.rgb = RGBColor(*color)
     return run
 
-def fill_complet(data):
-    doc = Document(io.BytesIO(CERT_COMPLET))
+def _replace_token(doc, token, value):
+    """Remplace un jeton {{...}} par sa valeur, dans les paragraphes du corps
+    ET dans les tableaux (le nouveau template de certificat place certains
+    jetons dans le tableau des signatures)."""
+    def _scan(paragraphs):
+        for p in paragraphs:
+            for run in p.runs:
+                if token in run.text:
+                    run.text = run.text.replace(token, value)
+    _scan(doc.paragraphs)
+    for t in doc.tables:
+        for row in t.rows:
+            for cell in row.cells:
+                _scan(cell.paragraphs)
+
+def _fill_certificate(template_bytes, data):
+    doc = Document(io.BytesIO(template_bytes))
     civ = 'Madame' if normalize_civilite(data['civilite']) else 'Monsieur'
     nom_complet = f"{data['prenom']} {data['nom']}"
     date_cours = datetime.strptime(data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
+    formateur = data['formateur']
+    formateur2 = data.get('formateur2')
 
-    # Para 8 = civilité (vide dans complet)
-    para8 = doc.paragraphs[8]
-    clear_para(para8)
-    set_center(para8)
-    add_run(para8, civ, 14, color=(0x5B, 0x5B, 0x5B))
+    _replace_token(doc, '{{CIVILITE}}', civ)
+    _replace_token(doc, '{{NOM_COMPLET}}', nom_complet)
+    _replace_token(doc, '{{DATE_COURS}}', date_cours)
+    _replace_token(doc, '{{SIGNATURE}}', formateur)
+    _replace_token(doc, '{{SIGNATURE2}}', formateur2 or '')
+    _replace_token(doc, '{{ROLE2}}', 'Instructeur-trice' if formateur2 else '')
 
-    # Para 9 = nom (RecipientName, vide dans complet)
-    para9 = doc.paragraphs[9]
-    clear_para(para9)
-    set_center(para9)
-    add_run(para9, nom_complet, 20, bold=True, color=(0xC0, 0x39, 0x2B))
-
-    # Para 14 = "Le :" + date
-    para14 = doc.paragraphs[14]
-    for run in para14.runs:
-        if run.text.strip() == '':
-            run.text = f' {date_cours}'
-            break
-    else:
-        para14.add_run(f' {date_cours}')
-
-    # Table row 0
-    table = doc.tables[0]
-    _fill_table(table, data['formateur'], data.get('formateur2'))
+    if not formateur2:
+        # Retire le trait sous l'emplacement du 2e instructeur, resté vide
+        try:
+            p2 = doc.tables[0].rows[2].cells[2].paragraphs[0]
+            pPr = p2._p.find(qn('w:pPr'))
+            if pPr is not None:
+                pBdr = pPr.find(qn('w:pBdr'))
+                if pBdr is not None:
+                    pPr.remove(pBdr)
+        except (IndexError, AttributeError):
+            pass
 
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+def fill_complet(data):
+    return _fill_certificate(CERT_COMPLET, data)
 
 def fill_compact(data):
-    doc = Document(io.BytesIO(CERT_COMPACT))
-    civ = 'Madame' if normalize_civilite(data['civilite']) else 'Monsieur'
-    nom_complet = f"{data['prenom']} {data['nom']}"
-    date_cours = datetime.strptime(data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
-
-    # Para 5 = "Monsieur/Madame" → remplacer par civilité
-    para5 = doc.paragraphs[5]
-    clear_para(para5)
-    set_center(para5)
-    add_run(para5, civ, 14, color=(0x5B, 0x5B, 0x5B))
-
-    # Para 7 = "Tartenpion marcel" → remplacer par nom
-    para7 = doc.paragraphs[7]
-    clear_para(para7)
-    set_center(para7)
-    add_run(para7, nom_complet, 20, bold=True, color=(0xC0, 0x39, 0x2B))
-
-    # Para 12 = "Le : " → ajouter date
-    para12 = doc.paragraphs[12]
-    for run in para12.runs:
-        if 'Le' in run.text:
-            run.text = f'Le : {date_cours}'
-            break
-
-    # Table row 0
-    table = doc.tables[0]
-    _fill_table(table, data['formateur'], data.get('formateur2'))
-
-    out = io.BytesIO()
-    doc.save(out)
-    return out.getvalue()
-
-def _fill_table(table, formateur, formateur2=None):
-    # Row 0 cell 0 = 2e instructeur (si présent), sinon vide
-    cell_left = table.rows[0].cells[0]
-    for para in cell_left.paragraphs:
-        clear_para(para)
-    if formateur2:
-        p = cell_left.paragraphs[0]
-        set_center(p)
-        r0 = add_run(p, formateur2, 13, italic=True, color=(0xC0, 0x39, 0x2B))
-        r0.font.name = 'Brush Script MT'
-
-    # Row 0 cell 2 = formateur
-    cell_sign = table.rows[0].cells[2]
-    for para in cell_sign.paragraphs:
-        clear_para(para)
-    p2 = cell_sign.paragraphs[0]
-    set_center(p2)
-    r = add_run(p2, formateur, 13, italic=True, color=(0xC0, 0x39, 0x2B))
-    r.font.name = 'Brush Script MT'
-
-    # Vider row 1
-    for ci in [0, 2]:
-        for para in table.rows[1].cells[ci].paragraphs:
-            clear_para(para)
+    return _fill_certificate(CERT_COMPACT, data)
 
 def fill_fiche_presence(data):
     wb = openpyxl.load_workbook(io.BytesIO(FICHE_PRESENCE))
