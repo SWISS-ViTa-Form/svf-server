@@ -129,6 +129,12 @@ def statut_affiche(doc):
     return st
 
 
+def numero_affiche(n):
+    """AAAA-NNNN (numero = AAAA*10000 + NNNN) ; anciens numéros sur 7 chiffres."""
+    n = int(n)
+    return f'{n // 10000}-{n % 10000:04d}' if n >= 10000 else f'{n:07d}'
+
+
 def _esc(t):
     return (t or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
 
@@ -206,7 +212,7 @@ def _decorer(pdf_bytes, avec_qr, numero=''):
 def build_document_pdf(doc, lignes, logo_bytes=None):
     est_facture = doc['type'] == 'facture'
     avec_qr = False
-    numero = f"{int(doc['numero']):07d}"
+    numero = numero_affiche(doc['numero'])
     tot = calcul_totaux(doc, lignes)
 
     s = lambda name, **kw: ParagraphStyle(name, fontName=kw.pop('font', FONT),
@@ -326,7 +332,7 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
     if est_facture:
         gauche = [Paragraph('Merci pour votre confiance,', st_small), Spacer(1, 1.5 * mm),
                   Paragraph('SWISS ViTa Form.', st_small), Spacer(1, 3 * mm),
-                  Paragraph(f'Le paiement doit être effectué aux coordonnées suivantes <b>avec la mention du numéro de facture</b> : {int(doc["numero"]):05d}', st_small)]
+                  Paragraph(f'Le paiement doit être effectué aux coordonnées suivantes <b>avec la mention du numéro de facture</b> : {numero}', st_small)]
         droite_p = [Paragraph(x, st_small) for x in PAIEMENT]
         bloc = Table([[gauche, droite_p]], colWidths=[W * 0.52, W * 0.48])
         bloc.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -357,7 +363,7 @@ def _ajouter_qr(pdf_bytes, numero, montant):
     from reportlab.graphics import renderPDF
     from pypdf import PdfReader, PdfWriter
     bill = QRBill(account=QR_IBAN, creditor=QR_CREDITOR, amount=f'{Decimal(str(montant)):.2f}',
-                  currency='CHF', additional_information=f'Facture {int(numero)}', language='fr')
+                  currency='CHF', additional_information=f'Facture {numero}', language='fr')
     svg = io.StringIO()
     bill.as_svg(svg, full_page=True)
     drawing = svg2rlg(io.BytesIO(svg.getvalue().encode('utf-8')))
@@ -374,7 +380,7 @@ def _ajouter_qr(pdf_bytes, numero, montant):
 
 
 def nom_fichier(doc):
-    return f"{'Facture' if doc['type'] == 'facture' else 'Devis'}_{int(doc['numero']):07d}.pdf"
+    return f"{'Facture' if doc['type'] == 'facture' else 'Devis'}_{numero_affiche(doc['numero'])}.pdf"
 
 
 def register_document_routes(app, logo_bytes, brevo_api_key):
@@ -403,7 +409,7 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
             pdf = build_document_pdf(doc, lignes, logo_bytes)
             tot = calcul_totaux(doc, lignes)
             est_facture = doc['type'] == 'facture'
-            numero = f"{int(doc['numero']):07d}"
+            numero = numero_affiche(doc['numero'])
             libelle = 'Facture' if est_facture else 'Devis'
             html = f"""
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -416,6 +422,7 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
                 <p>Veuillez trouver ci-joint {'la facture' if est_facture else 'le devis'} n° {numero}
                 {('« ' + _esc(doc.get('titre'))) + ' »' if doc.get('titre') else ''}
                 d'un montant de <strong>{_chf(tot['total'])}</strong>.</p>
+                {'' if est_facture else '<p>Nos conditions générales sont jointes à ce devis : en l\'acceptant, vous les acceptez.</p>'}
                 <p>Vous pouvez aussi le retrouver à tout moment sur votre espace client :</p>
                 <div style="text-align: center; margin: 24px 0;">
                   <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
@@ -432,6 +439,12 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
                 'htmlContent': html,
                 'attachment': [{'content': base64.b64encode(pdf).decode(), 'name': nom_fichier(doc)}],
             }
+            # Devis : on joint les conditions générales (conditions_generales.pdf à côté de ce fichier)
+            cg_path = os.path.join(_ici, 'conditions_generales.pdf')
+            if not est_facture and os.path.exists(cg_path):
+                with open(cg_path, 'rb') as fh:
+                    payload['attachment'].append({'content': base64.b64encode(fh.read()).decode(),
+                                                  'name': 'Conditions_generales_SWISS_ViTa_Form.pdf'})
             r = requests.post('https://api.brevo.com/v3/smtp/email',
                               headers={'api-key': brevo_api_key, 'Content-Type': 'application/json'}, json=payload)
             print(f'[BREVO document] status={r.status_code} body={r.text}')
