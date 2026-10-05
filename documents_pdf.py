@@ -19,19 +19,42 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (CondPageBreak, BaseDocTemplate, Frame, PageTemplate, Paragraph,
+from reportlab.platypus import (CondPageBreak, HRFlowable, Flowable, BaseDocTemplate, Frame, PageTemplate, Paragraph,
                                 Spacer, Table, TableStyle, KeepTogether, Image)
 
-# Police Unicode (Liberation Sans, installée avec LibreOffice) pour les caractères hors WinAnsi (ć, etc.)
-FONT, FONT_BOLD = 'Helvetica', 'Helvetica-Bold'
-try:
-    _dir = '/usr/share/fonts/truetype/liberation/'
-    pdfmetrics.registerFont(TTFont('LibSans', _dir + 'LiberationSans-Regular.ttf'))
-    pdfmetrics.registerFont(TTFont('LibSans-Bold', _dir + 'LiberationSans-Bold.ttf'))
-    pdfmetrics.registerFontFamily('LibSans', normal='LibSans', bold='LibSans-Bold')
-    FONT, FONT_BOLD = 'LibSans', 'LibSans-Bold'
-except Exception:
-    pass
+# Polices du site / des certificats : Poppins (texte) + Lora (titres). Repli sur Liberation Sans puis Helvetica.
+import os
+FONT, FONT_BOLD, FONT_TITLE = 'Helvetica', 'Helvetica-Bold', 'Helvetica'
+_ici = os.path.dirname(os.path.abspath(__file__))
+for _d in (os.path.join(_ici, 'fonts'), '/app/fonts', '/usr/share/fonts/truetype/custom',
+           '/usr/share/fonts/truetype/google-fonts'):
+    try:
+        pdfmetrics.registerFont(TTFont('PopL', os.path.join(_d, 'Poppins-Light.ttf')))
+        pdfmetrics.registerFont(TTFont('PopR', os.path.join(_d, 'Poppins-Regular.ttf')))
+        pdfmetrics.registerFont(TTFont('PopM', os.path.join(_d, 'Poppins-Medium.ttf')))
+        pdfmetrics.registerFontFamily('PopL', normal='PopL', bold='PopM', italic='PopL', boldItalic='PopM')
+        FONT, FONT_BOLD = 'PopL', 'PopM'
+        break
+    except Exception:
+        continue
+else:
+    try:
+        _dir = '/usr/share/fonts/truetype/liberation/'
+        pdfmetrics.registerFont(TTFont('LibSans', _dir + 'LiberationSans-Regular.ttf'))
+        pdfmetrics.registerFont(TTFont('LibSans-Bold', _dir + 'LiberationSans-Bold.ttf'))
+        pdfmetrics.registerFontFamily('LibSans', normal='LibSans', bold='LibSans-Bold')
+        FONT, FONT_BOLD = 'LibSans', 'LibSans-Bold'
+    except Exception:
+        pass
+FONT_TITLE = FONT_BOLD
+for _d in (os.path.join(_ici, 'fonts'), '/app/fonts', '/usr/share/fonts/truetype/custom',
+           '/usr/share/fonts/truetype/google-fonts'):
+    try:
+        pdfmetrics.registerFont(TTFont('LoraT', os.path.join(_d, 'Lora-Variable.ttf')))
+        FONT_TITLE = 'LoraT'
+        break
+    except Exception:
+        continue
 
 SOCIETE = {
     'nom': 'SWISS ViTa Form',
@@ -45,11 +68,14 @@ QR_CREDITOR = {'name': 'Detta Vincent', 'street': 'Rue des Remparts', 'house_num
 PAIEMENT = ['Detta Vincent', 'SWISS ViTa Form Detta', 'Rue des Remparts 17', '1400 Yverdon-les-Bains',
             'IBAN : CH31 0076 7000 C561 3150 4', 'Banque : Banque Cantonale Vaudoise']
 
-NAVY = colors.HexColor('#0E1A3A')
-GREY = colors.HexColor('#8A8FA8')
-HEAD_BG = colors.HexColor('#D6E4FB')
-BOX_BG = colors.HexColor('#F3F8FE')
-LINE = colors.HexColor('#DADDE6')
+NAVY = colors.HexColor('#3A2C2C')      # texte (palette des certificats)
+DARK = colors.HexColor('#2A2020')
+GREY = colors.HexColor('#8A7A7A')
+RED = colors.HexColor('#B8050F')
+FRAME = colors.HexColor('#C0392B')
+HEAD_BG = colors.HexColor('#F6ECE9')
+BOX_BG = colors.HexColor('#FBF5F3')
+LINE = colors.HexColor('#E3C9C2')
 BADGES = {
     'paye': ('Payé', '#CDEBD8'), 'facture': ('Facturé', '#CDEBD8'),
     'expire': ('Expiré', '#F9CFCF'), 'annule': ('Annulé', '#F9CFCF'),
@@ -82,12 +108,14 @@ def _date_fr(v):
 
 def calcul_totaux(doc, lignes):
     sous = sum((_d(l.get('quantite')) * _d(l.get('prix_unitaire')) for l in lignes), Decimal(0))
-    remise = (sous * _d(doc.get('remise_pct')) / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    remise_pct = (sous * _d(doc.get('remise_pct')) / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    remise_chf = _d(doc.get('remise_montant')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    remise = min(remise_pct + remise_chf, sous)
     taxes = _d(doc.get('taxes'))
     total = sous - remise + taxes
     paye = _d(doc.get('montant_paye'))
-    return {'sous_total': sous, 'remise': remise, 'taxes': taxes, 'total': total,
-            'paye': paye, 'reste': total - paye}
+    return {'sous_total': sous, 'remise': remise, 'remise_pct': remise_pct, 'remise_chf': remise_chf,
+            'taxes': taxes, 'total': total, 'paye': paye, 'reste': total - paye}
 
 
 def statut_affiche(doc):
@@ -105,6 +133,76 @@ def _esc(t):
     return (t or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br/>')
 
 
+class _TitreEspace(Flowable):
+    """Titre en capitales espacées (comme « CERTIFICAT »), aligné à droite."""
+    def __init__(self, texte, largeur, taille=20, espace=4.5, couleur=DARK):
+        super().__init__()
+        self.texte, self.largeur, self.taille, self.espace, self.couleur = texte, largeur, taille, espace, couleur
+        self.height = taille * 1.35
+
+    def wrap(self, aw, ah):
+        return self.largeur, self.height
+
+    def draw(self):
+        c = self.canv
+        c.setFont(FONT_TITLE, self.taille)
+        c.setFillColor(self.couleur)
+        w = pdfmetrics.stringWidth(self.texte, FONT_TITLE, self.taille) + self.espace * (len(self.texte) - 1)
+        t = c.beginText(self.largeur - w, self.taille * 0.3)
+        t.setFont(FONT_TITLE, self.taille)
+        t.setCharSpace(self.espace)
+        t.textOut(self.texte)
+        c.drawText(t)
+
+
+FOOTER = 'SWISS ViTa Form Vincent Detta  ·  Av. Kiener 29  ·  1400 Yverdon-les-Bains  ·  078 892 02 63  ·  info@swissvf.ch'
+QR_H = 105 * mm
+
+
+def _decorer(pdf_bytes, avec_qr, numero=''):
+    """Cadre rouge fin + pied de page (style des certificats). Sur la page du bulletin QR,
+    le cadre s'arrête à la ligne de découpe et le pied de page est omis."""
+    from pypdf import PdfReader, PdfWriter
+    from reportlab.pdfgen import canvas as rl_canvas
+    base = PdfReader(io.BytesIO(pdf_bytes))
+    n = len(base.pages)
+    pw, ph = A4
+    m = 8.5 * mm
+    buf = io.BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=A4)
+    for i in range(n):
+        c.setStrokeColor(FRAME)
+        c.setLineWidth(0.75)
+        vide = avec_qr and i == n - 1 and not (base.pages[i].extract_text() or '').strip()
+        if vide:  # page réservée au bulletin QR : pas de cadre, juste un rappel
+            c.setFont(FONT_TITLE, 14)
+            c.setFillColor(RED)
+            c.drawString(20 * mm, ph - 28 * mm, f'Facture n° {numero} — bulletin de paiement')
+            c.setFont(FONT, 8.5)
+            c.setFillColor(GREY)
+            c.drawString(20 * mm, ph - 35 * mm, 'Merci de régler au moyen du bulletin ci-dessous (scan avec votre application bancaire).')
+        elif avec_qr and i == n - 1:
+            c.line(m, ph - m, pw - m, ph - m)
+            c.line(m, ph - m, m, QR_H + 3 * mm)
+            c.line(pw - m, ph - m, pw - m, QR_H + 3 * mm)
+            c.line(m, QR_H + 3 * mm, pw - m, QR_H + 3 * mm)
+        else:
+            c.rect(m, m, pw - 2 * m, ph - 2 * m)
+            c.setFont(FONT, 6.5)
+            c.setFillColor(GREY)
+            c.drawCentredString(pw / 2, m + 4.5 * mm, FOOTER)
+        c.showPage()
+    c.save()
+    deco = PdfReader(io.BytesIO(buf.getvalue()))
+    w = PdfWriter()
+    for i, page in enumerate(base.pages):
+        page.merge_page(deco.pages[i])
+        w.add_page(page)
+    out = io.BytesIO()
+    w.write(out)
+    return out.getvalue()
+
+
 def build_document_pdf(doc, lignes, logo_bytes=None):
     est_facture = doc['type'] == 'facture'
     avec_qr = False
@@ -112,130 +210,138 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
     tot = calcul_totaux(doc, lignes)
 
     s = lambda name, **kw: ParagraphStyle(name, fontName=kw.pop('font', FONT),
-                                          fontSize=kw.pop('size', 9), leading=kw.pop('lead', 12),
+                                          fontSize=kw.pop('size', 9), leading=kw.pop('lead', 12.5),
                                           textColor=kw.pop('color', NAVY), **kw)
-    st_norm, st_small = s('n'), s('sm', size=8.5, lead=11.5)
-    st_bold = s('b', font=FONT_BOLD)
-    st_title = s('t', font=FONT_BOLD, size=11, lead=14)
-    st_desc = s('d', size=8.5, lead=11.5, color=GREY)
+    st_norm, st_small = s('n'), s('sm', size=8.5, lead=12)
+    st_desc = s('d', size=8, lead=11, color=GREY)
     st_right = s('r', alignment=TA_RIGHT)
-    st_hnum = s('hn', font=FONT_BOLD, size=18 if est_facture else 9, lead=22 if est_facture else 12,
-                alignment=TA_RIGHT)
+    st_th = s('th', font=FONT_BOLD, size=7.5, lead=10, color=RED)
+    st_th_r = s('thr', font=FONT_BOLD, size=7.5, lead=10, color=RED, alignment=TA_RIGHT)
+    st_lbl = s('lbl', size=7.5, lead=10, color=RED, font=FONT_BOLD)
 
+    titre_doc = 'Facture' if est_facture else 'Devis'
     buf = io.BytesIO()
-    pdf = BaseDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
-                          topMargin=15 * mm, bottomMargin=15 * mm,
-                          title=f"{'Facture' if est_facture else 'Devis'} n° {numero}", author='SWISS ViTa Form')
+    pdf = BaseDocTemplate(buf, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm,
+                          topMargin=19 * mm, bottomMargin=19 * mm,
+                          title=f"{titre_doc} n° {numero}", author='SWISS ViTa Form')
     frame = Frame(pdf.leftMargin, pdf.bottomMargin, pdf.width, pdf.height, id='f', leftPadding=0,
                   rightPadding=0, topPadding=0, bottomPadding=0)
     pdf.addPageTemplates([PageTemplate(id='p', frames=[frame])])
     W = pdf.width
     story = []
 
-    # --- En-tête : logo + société | numéro + dates ---
+    # --- En-tête : logo + société | titre espacé + numéro + dates ---
     logo = ''
     if logo_bytes:
         w, h = ImageReader(io.BytesIO(logo_bytes)).getSize()
-        logo = Image(io.BytesIO(logo_bytes), width=24 * mm, height=24 * mm * h / w)
-    societe = [Paragraph(f'<b>{SOCIETE["nom"]}</b>', st_small)] + [Paragraph(x, st_small) for x in SOCIETE['lignes']]
-    droite = [Paragraph(f"{'Facture' if est_facture else 'Devis'} n° {numero}", st_hnum)]
+        logo = Image(io.BytesIO(logo_bytes), width=30 * mm, height=30 * mm * h / w)
+    societe = [Paragraph(f'<b>{SOCIETE["nom"]}</b>', s('sn', size=8.5, lead=12, color=DARK))] + \
+              [Paragraph(x, s('sg', size=7.5, lead=10.5, color=GREY)) for x in SOCIETE['lignes']]
+    droite_w = W * 0.5
+    droite = [_TitreEspace(titre_doc.upper(), droite_w),
+              Paragraph(f'N° {numero}', s('num', font=FONT_BOLD, size=11, lead=16, color=RED, alignment=TA_RIGHT))]
     dates = [f"Date d'émission : {_date_fr(doc['date_emission'])}" if est_facture else f"Émis le : {_date_fr(doc['date_emission'])}"]
     if doc.get('date_echeance'):
         dates.append(f"Échéance : {_date_fr(doc['date_echeance'])}" if est_facture else f"Expire le : {_date_fr(doc['date_echeance'])}")
-    droite += [Paragraph(x, s('dt', size=8.5, lead=12, alignment=TA_RIGHT)) for x in dates]
+    droite += [Spacer(1, 1.5 * mm)] + [Paragraph(x, s('dt', size=8, lead=11.5, color=GREY, alignment=TA_RIGHT)) for x in dates]
     badge = BADGES.get(statut_affiche(doc))
     if badge and not (est_facture and statut_affiche(doc) == 'facture'):
-        droite.insert(0, Table([[Paragraph(badge[0], s('bd', size=8.5, alignment=1))]], colWidths=[22 * mm],
-                               style=[('BACKGROUND', (0, 0), (-1, -1), colors.HexColor(badge[1])),
-                                      ('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)],
-                               hAlign='RIGHT'))
-        droite.insert(1, Spacer(1, 4))
-    head = Table([[logo, societe, droite]], colWidths=[30 * mm, W * 0.5 - 30 * mm, W * 0.5])
+        droite += [Spacer(1, 2 * mm), Table([['', Paragraph(badge[0], s('bd', size=8, alignment=1))]],
+                               colWidths=[droite_w - 22 * mm, 22 * mm],
+                               style=[('BACKGROUND', (1, 0), (1, 0), colors.HexColor(badge[1])),
+                                      ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                                      ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)])]
+    head = Table([[[logo, Spacer(1, 2 * mm)] + societe, droite]], colWidths=[W * 0.5, droite_w])
     head.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0),
                               ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
-    story += [head, Spacer(1, 8 * mm)]
+    story += [head, Spacer(1, 5 * mm),
+              HRFlowable(width='100%', thickness=0.6, color=LINE, spaceAfter=5 * mm)]
 
-    # --- Objet + client ---
-    if est_facture:
-        story += [Paragraph('<b>Facturer à :</b>' if doc.get('client_adresse') else '<b>Infos client :</b>',
-                            s('lbl', size=8.5, color=GREY))]
-    else:
-        if doc.get('titre'):
-            story += [Paragraph(f"<b>{_esc(doc['titre'])}</b>", st_norm), Spacer(1, 4 * mm)]
-    story += [Paragraph(f"<b>{_esc(doc['client_nom'])}</b>", st_norm)]
+    # --- Client + objet ---
+    story += [Paragraph('FACTURER À' if (est_facture and doc.get('client_adresse')) else
+                        'INFOS CLIENT' if est_facture else 'DESTINATAIRE', st_lbl), Spacer(1, 1.5 * mm),
+              Paragraph(f"<b>{_esc(doc['client_nom'])}</b>", s('cn', size=10, lead=14, color=DARK))]
     for k in ('client_email', 'client_adresse', 'client_tel'):
         if doc.get(k):
             story.append(Paragraph(_esc(doc[k]), st_norm))
-    story.append(Spacer(1, 6 * mm))
-    if est_facture and doc.get('titre'):
-        story += [Paragraph(_esc(doc['titre']), s('ft', font=FONT_BOLD, size=13, lead=16)), Spacer(1, 2 * mm)]
+    story.append(Spacer(1, 7 * mm))
+    if doc.get('titre'):
+        story += [Paragraph(_esc(doc['titre']), s('ft', font=FONT_TITLE, size=14, lead=18, color=RED)), Spacer(1, 4 * mm)]
 
     # --- Tableau des lignes ---
     cw = [W - 100 * mm, 20 * mm, 38 * mm, 42 * mm]
-    rows = [[Paragraph('<b>Article ou service</b>', st_norm), Paragraph('<b>Quantité</b>', st_norm),
-             Paragraph('<b>Prix</b>', st_norm), Paragraph('<b>Total</b>', st_right)]]
+    rows = [[Paragraph('ARTICLE OU SERVICE', st_th), Paragraph('QUANTITÉ', st_th),
+             Paragraph('PRIX', st_th), Paragraph('TOTAL', st_th_r)]]
     for l in sorted(lignes, key=lambda x: x.get('position', 0)):
-        cell = [Paragraph(_esc(l['titre']), st_norm)]
+        cell = [Paragraph(f"<b>{_esc(l['titre'])}</b>", st_norm)]
         desc = (l.get('description') or '')
         if l.get('offert'):
             desc = (desc + ' *OFFERT*').strip()
         if desc:
             cell.append(Paragraph(_esc(desc), st_desc))
         total_l = _d(l['quantite']) * _d(l['prix_unitaire'])
-        q = _d(l['quantite'])
-        rows.append([cell, Paragraph(_num(q), st_norm),
+        rows.append([cell, Paragraph(_num(_d(l['quantite'])), st_norm),
                      Paragraph(_chf(l['prix_unitaire']), st_norm), Paragraph(_chf(total_l), st_right)])
     t = Table(rows, colWidths=cw, repeatRows=1)
     t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), HEAD_BG), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('LINEBELOW', (0, 1), (-1, -1), 0.5, LINE), ('TOPPADDING', (0, 0), (-1, -1), 7),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 7), ('LEFTPADDING', (0, 0), (0, -1), 6),
-        ('RIGHTPADDING', (-1, 0), (-1, -1), 6)]))
-    story += [t, Spacer(1, 8 * mm)]
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.8, FRAME),
+        ('LINEBELOW', (0, 1), (-1, -1), 0.4, LINE), ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6), ('LEFTPADDING', (0, 0), (0, -1), 0),
+        ('RIGHTPADDING', (-1, 0), (-1, -1), 0)]))
+    story += [t, Spacer(1, 6 * mm)]
 
     # --- Totaux ---
     lignes_tot = [[Paragraph('Sous-total', st_norm), Paragraph(_chf(tot['sous_total']), st_right)]]
-    if tot['remise'] > 0:
-        pct = _num(doc.get('remise_pct'))
-        lignes_tot.append([Paragraph(f'Réduction ({pct} %)', st_norm), Paragraph(_chf(tot['remise']), st_right)])
+    if tot['remise_pct'] > 0:
+        lignes_tot.append([Paragraph(f"Réduction ({_num(doc.get('remise_pct'))} %)", st_norm),
+                           Paragraph('-' + _chf(tot['remise_pct']), st_right)])
+    if tot['remise_chf'] > 0:
+        lignes_tot.append([Paragraph('Réduction', st_norm), Paragraph('-' + _chf(tot['remise_chf']), st_right)])
     if est_facture:
         lignes_tot.append([Paragraph('Taxes', st_norm), Paragraph(_chf(tot['taxes']), st_right)])
         lignes_tot.append([Paragraph('Total de la facture', st_norm), Paragraph(_chf(tot['total']), st_right)])
         lignes_tot.append([Paragraph('Montant payé', st_norm), Paragraph(_chf(tot['paye']), st_right)])
         final = ('Reste à payer', tot['reste'])
     else:
-        final = ('Prix total :', tot['total'])
-    tt = Table(lignes_tot, colWidths=[40 * mm, 42 * mm], hAlign='RIGHT')
-    tt.setStyle(TableStyle([('TOPPADDING', (0, 0), (-1, -1), 3), ('BOTTOMPADDING', (0, 0), (-1, -1), 3)]))
-    box = Table([[Paragraph(final[0], st_norm), Paragraph(f'<b>{_chf(final[1])}</b>', s('fx', size=13, lead=16, alignment=TA_RIGHT))]],
-                colWidths=[40 * mm, 42 * mm], hAlign='RIGHT')
-    box.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), BOX_BG), ('BOX', (0, 0), (-1, -1), 0.5, HEAD_BG),
-                             ('TOPPADDING', (0, 0), (-1, -1), 8), ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        final = ('Prix total', tot['total'])
+    tt = Table(lignes_tot, colWidths=[44 * mm, 40 * mm], hAlign='RIGHT')
+    tt.setStyle(TableStyle([('TOPPADDING', (0, 0), (-1, -1), 2.5), ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
+                            ('RIGHTPADDING', (-1, 0), (-1, -1), 0), ('LEFTPADDING', (0, 0), (0, -1), 0)]))
+    box = Table([[Paragraph(final[0].upper(), st_th), Paragraph(_chf(final[1]), s('fx', font=FONT_TITLE, size=14, lead=18, color=RED, alignment=TA_RIGHT))]],
+                colWidths=[44 * mm, 40 * mm], hAlign='RIGHT')
+    box.setStyle(TableStyle([('LINEABOVE', (0, 0), (-1, 0), 0.8, FRAME), ('LINEBELOW', (0, 0), (-1, 0), 0.4, LINE),
+                             ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                             ('LEFTPADDING', (0, 0), (0, -1), 0), ('RIGHTPADDING', (-1, 0), (-1, -1), 0),
                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story.append(KeepTogether([tt, Spacer(1, 3 * mm), box]))
+    story.append(KeepTogether([tt, Spacer(1, 2 * mm), box]))
 
-    # --- Notes / mentions / paiement ---
-    if doc.get('notes'):
-        story += [Spacer(1, 8 * mm), Paragraph('<b>Notes</b>', st_small), Paragraph(_esc(doc['notes']), st_small)]
-    story.append(Spacer(1, 5 * mm if est_facture else 8 * mm))
+    # --- Notes / conditions / paiement ---
+    notes = (doc.get('notes') or '').strip()
+    if not est_facture and 'conditions générales' not in notes.lower():
+        notes = (notes + '\n' if notes else '') + 'En acceptant ce devis, vous acceptez nos conditions générales.'
+    if notes:
+        story += [Spacer(1, 7 * mm), Paragraph('NOTES', st_lbl), Spacer(1, 1.5 * mm), Paragraph(_esc(notes), st_small)]
+    story.append(Spacer(1, 6 * mm))
     if est_facture:
-        gauche = [Paragraph('Merci pour votre confiance,', st_small), Spacer(1, 2 * mm),
-                  Paragraph('SWISS ViTa Form.', st_small), Spacer(1, 4 * mm),
+        gauche = [Paragraph('Merci pour votre confiance,', st_small), Spacer(1, 1.5 * mm),
+                  Paragraph('SWISS ViTa Form.', st_small), Spacer(1, 3 * mm),
                   Paragraph(f'Le paiement doit être effectué aux coordonnées suivantes <b>avec la mention du numéro de facture</b> : {int(doc["numero"]):05d}', st_small)]
-        droite = [Paragraph(x, st_small) for x in PAIEMENT]
-        bloc = Table([[gauche, droite]], colWidths=[W * 0.52, W * 0.48])
+        droite_p = [Paragraph(x, st_small) for x in PAIEMENT]
+        bloc = Table([[gauche, droite_p]], colWidths=[W * 0.52, W * 0.48])
         bloc.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0),
                                   ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0)]))
         story += [bloc]
         avec_qr = doc.get('statut') != 'annule' and tot['reste'] > 0
         if avec_qr:  # place pour le bulletin de paiement (105 mm depuis le bas de la page)
-            story += [CondPageBreak(91 * mm), Spacer(1, 1)]
-    else:
-        story += [Paragraph('<b>Mentions légales</b>', st_small),
-                  Paragraph('En acceptant ce devis, vous acceptez nos conditions générales.', st_small)]
+            story += [CondPageBreak(QR_H - pdf.bottomMargin + 3 * mm), Spacer(1, 1)]
 
     pdf.build(story)
     data = buf.getvalue()
+    try:
+        data = _decorer(data, avec_qr, numero)
+    except Exception as e:
+        print('Décor (cadre/pied de page) non appliqué :', e)
     if avec_qr:
         try:
             data = _ajouter_qr(data, numero, tot['reste'])
