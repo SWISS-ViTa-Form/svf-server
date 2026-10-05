@@ -411,6 +411,7 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
             est_facture = doc['type'] == 'facture'
             numero = numero_affiche(doc['numero'])
             libelle = 'Facture' if est_facture else 'Devis'
+            note_cg = '' if est_facture else "<p>Nos conditions générales sont jointes à ce devis : en l'acceptant, vous les acceptez.</p>"
             html = f"""
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <div style="background: #c0392b; padding: 20px; text-align: center;">
@@ -422,7 +423,7 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
                 <p>Veuillez trouver ci-joint {'la facture' if est_facture else 'le devis'} n° {numero}
                 {('« ' + _esc(doc.get('titre'))) + ' »' if doc.get('titre') else ''}
                 d'un montant de <strong>{_chf(tot['total'])}</strong>.</p>
-                {'' if est_facture else '<p>Nos conditions générales sont jointes à ce devis : en l\'acceptant, vous les acceptez.</p>'}
+                {note_cg}
                 <p>Vous pouvez aussi le retrouver à tout moment sur votre espace client :</p>
                 <div style="text-align: center; margin: 24px 0;">
                   <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
