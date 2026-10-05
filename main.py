@@ -982,14 +982,58 @@ def bareme_km(km_aller_retour, params):
         return params.get('km_bareme_plus_100', 90)
 
 
+import re
+
+def _normalize_address(address):
+    a = address.strip()
+    a = re.sub(r'\bRte\b\.?', 'Route', a, flags=re.I)
+    a = re.sub(r'\bAv\b\.?', 'Avenue', a, flags=re.I)
+    a = re.sub(r'\bCh\b\.?', 'Chemin', a, flags=re.I)
+    return a
+
+
 def geocode_ors(address):
+    address = _normalize_address(address)
+    # Cherche "rue ..., 1007 Lausanne"
+    m = re.match(r'^(.*?)[,\s]+(\d{4})\s+(.+)$', address)
+
+    if m:
+        rue, npa, localite = m.group(1).strip(' ,'), m.group(2), m.group(3).strip()
+        resp = requests.get(
+            'https://api.openrouteservice.org/geocode/search/structured',
+            params={
+                'api_key': ORS_API_KEY,
+                'address': rue,
+                'postalcode': npa,
+                'locality': localite,
+                'country': 'CH',
+                'layers': 'address,street,venue',
+                'size': 1,
+            },
+            timeout=15
+        )
+        resp.raise_for_status()
+        features = resp.json().get('features', [])
+        if features:
+            props = features[0]['properties']
+            npa_trouve = props.get('postalcode')
+            if npa_trouve and npa_trouve != npa:
+                raise Exception(
+                    f"Adresse ambiguë : trouvé {props.get('label')} (NPA {npa_trouve}) "
+                    f"au lieu de {npa} {localite}. Saisir les km à la main."
+                )
+            lon, lat = features[0]['geometry']['coordinates']
+            return lon, lat, props.get('label', address)
+        # rien trouvé en structuré -> on tente le texte libre ci-dessous
+
+    # Repli : texte libre (lieux sans NPA, ex. "Golf de Payerne")
     resp = requests.get(
         'https://api.openrouteservice.org/geocode/search',
         params={
             'api_key': ORS_API_KEY, 'text': address, 'size': 1,
             'boundary.country': 'CH',
-            'layers': 'address,street,venue',  # évite de matcher une région/rivière large (ex: "Orbe" le cours d'eau)
-            'focus.point.lon': 6.9, 'focus.point.lat': 46.7  # biais vers le canton de Vaud
+            'layers': 'address,street,venue',
+            'focus.point.lon': 6.9, 'focus.point.lat': 46.7
         },
         timeout=15
     )
