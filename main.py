@@ -59,6 +59,70 @@ def _replace_token(doc, token, value):
             for cell in row.cells:
                 _scan(cell.paragraphs)
 
+def _strip_border(cell):
+    p = cell.paragraphs[0]
+    pPr = p._p.find(qn('w:pPr'))
+    if pPr is not None:
+        pBdr = pPr.find(qn('w:pBdr'))
+        if pBdr is not None:
+            pPr.remove(pBdr)
+
+def _set_cell(cell, text):
+    p = cell.paragraphs[0]
+    if p.runs:
+        p.runs[0].text = text
+        for r in p.runs[1:]:
+            r.text = ''
+
+def _fill_instructeurs(doc, instructeurs):
+    """Remplit le bloc des instructeurs sous la signature : 1 = colonne droite
+    (sous Direction du cours), 2 = gauche + droite, 3-4 = lignes supplementaires."""
+    import copy
+    t = doc.tables[0]
+    tr_sig, tr_role = t.rows[2]._tr, t.rows[3]._tr
+    n = len(instructeurs)
+    if n == 0:
+        _set_cell(t.rows[2].cells[2], '')
+        _set_cell(t.rows[3].cells[2], '')
+        _strip_border(t.rows[2].cells[2])
+        return
+    # lignes supplementaires si > 2 instructeurs
+    pairs = (n + 1) // 2
+    last = tr_role
+    for _ in range(pairs - 1):
+        n_sig, n_role = copy.deepcopy(tr_sig), copy.deepcopy(tr_role)
+        last.addnext(n_sig)
+        n_sig.addnext(n_role)
+        last = n_role
+    from docx.table import _Row
+    rows = [_Row(tr, t) for tr in t._tbl.tr_lst][2:]
+    # cellule gauche = copie de la cellule droite (meme style)
+    for k in range(pairs):
+        for off in (0, 1):
+            src_tc = rows[2*k+off].cells[2]._tc
+            dst_tc = rows[2*k+off].cells[0]._tc
+            dst_tc.getparent().replace(dst_tc, copy.deepcopy(src_tc))
+    rows = [_Row(tr, t) for tr in t._tbl.tr_lst][2:]
+    # ordre : 1 seul -> droite ; sinon gauche puis droite
+    slots = []
+    for k in range(pairs):
+        slots += [(k, 0), (k, 2)]
+    if n == 1:
+        slots = [(0, 2)]
+    elif n % 2 == 1:
+        slots = slots[:n-1] + [(pairs-1, 2)] if n > 2 else slots[:n]
+    used = set()
+    for name, (k, c) in zip(instructeurs, slots):
+        _set_cell(rows[2*k].cells[c], name)
+        _set_cell(rows[2*k+1].cells[c], 'Instructeur-trice')
+        used.add((k, c))
+    for k in range(pairs):
+        for c in (0, 2):
+            if (k, c) not in used:
+                _set_cell(rows[2*k].cells[c], '')
+                _set_cell(rows[2*k+1].cells[c], '')
+                _strip_border(rows[2*k].cells[c])
+
 def _fill_certificate(template_bytes, data):
     doc = Document(io.BytesIO(template_bytes))
     civ = 'Madame' if normalize_civilite(data['civilite']) else 'Monsieur'
@@ -71,20 +135,12 @@ def _fill_certificate(template_bytes, data):
     _replace_token(doc, '{{NOM_COMPLET}}', nom_complet)
     _replace_token(doc, '{{DATE_COURS}}', date_cours)
     _replace_token(doc, '{{SIGNATURE}}', formateur)
-    _replace_token(doc, '{{SIGNATURE2}}', formateur2 or '')
-    _replace_token(doc, '{{ROLE2}}', 'Instructeur-trice' if formateur2 else '')
-
-    if not formateur2:
-        # Retire le trait sous l'emplacement du 2e instructeur, resté vide
-        try:
-            p2 = doc.tables[0].rows[2].cells[2].paragraphs[0]
-            pPr = p2._p.find(qn('w:pPr'))
-            if pPr is not None:
-                pBdr = pPr.find(qn('w:pBdr'))
-                if pBdr is not None:
-                    pPr.remove(pBdr)
-        except (IndexError, AttributeError):
-            pass
+    # Instructeurs : liste (0 a 4). Compat ancienne API : formateur2 seul.
+    instructeurs = data.get('instructeurs')
+    if instructeurs is None:
+        instructeurs = [formateur2] if formateur2 else []
+    instructeurs = [i for i in instructeurs if i][:4]
+    _fill_instructeurs(doc, instructeurs)
 
     out = io.BytesIO()
     doc.save(out)
