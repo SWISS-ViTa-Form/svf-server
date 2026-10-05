@@ -11,6 +11,7 @@ import openpyxl
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from pypdf import PdfReader, PdfWriter
+from documents_pdf import register_document_routes
 
 app = Flask(__name__)
 CORS(app, origins=['https://portail.swissvf.ch', 'http://localhost:3000', '*'])
@@ -354,6 +355,9 @@ def generate_fiche_presence():
 # ==================== EMAIL ====================
 
 BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
+
+# Devis & factures (PDF + envoi email + QR-facture)
+register_document_routes(app, LOGO_SVF, BREVO_API_KEY)
 
 def send_email_formateur(formateur_email, formateur_nom, cours_data):
     """Envoyer un email de notification au formateur"""
