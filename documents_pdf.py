@@ -412,6 +412,14 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
             numero = numero_affiche(doc['numero'])
             libelle = 'Facture' if est_facture else 'Devis'
             note_cg = '' if est_facture else "<p>Nos conditions générales sont jointes à ce devis : en l'acceptant, vous les acceptez.</p>"
+            # Lien portail uniquement si le client a un espace client (flag envoyé par le portail).
+            # Un futur client sans login ne reçoit ni la phrase ni le bouton.
+            bloc_portail = ''
+            if data.get('avec_portail'):
+                bloc_portail = """<p>Vous pouvez aussi le retrouver à tout moment sur votre espace client :</p>
+                <div style="text-align: center; margin: 24px 0;">
+                  <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
+                </div>"""
             html = f"""
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <div style="background: #c0392b; padding: 20px; text-align: center;">
@@ -424,10 +432,7 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
                 {('« ' + _esc(doc.get('titre'))) + ' »' if doc.get('titre') else ''}
                 d'un montant de <strong>{_chf(tot['total'])}</strong>.</p>
                 {note_cg}
-                <p>Vous pouvez aussi le retrouver à tout moment sur votre espace client :</p>
-                <div style="text-align: center; margin: 24px 0;">
-                  <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
-                </div>
+                {bloc_portail}
               </div>
               <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
                 Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
