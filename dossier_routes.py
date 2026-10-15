@@ -32,15 +32,18 @@ MAX_BYTES = 10 * 1024 * 1024
 # (clé, libellé, libellé court, date d'expiration obligatoire)
 FORMATEUR_TYPES = [
     ('cert_instructeur', 'Certificat / attestation instructeur BLS-AED-SRC', 'Instructeur', False),
-    ('diplome_infirmier', 'Diplôme infirmier', 'Infirmier', False),
-    ('diplome_ambulancier', 'Diplôme ambulancier', 'Ambulancier', False),
-    ('brevet_fed_ta', 'Certificat ou brevet fédéral de technicien ambulancier', 'Brevet TA', False),
     ('maj_instructeur', 'Mise à jour BLS-AED-SRC instructeur', 'Mise à jour', True),
+    ('diplome_pro', 'Diplôme ou brevet : ambulancier / technicien ambulancier / infirmier', 'Diplôme', False),
+    ('autre_formateur', 'Autres documents (à nommer)', 'Autre', False),
 ]
 ADMIN_TYPES = [
     ('contrat', 'Contrat de travail signé', 'Contrat', False),
-    ('cg_signees', 'Conditions générales signées', 'CG', False),
+    ('reglement', 'Règlement signé', 'Règlement', False),
+    ('avenant', 'Avenant au contrat', 'Avenant', False),
+    ('autre_admin', 'Autres documents (à nommer)', 'Autre', False),
 ]
+# types où l'on peut déposer plusieurs documents, chacun avec son nom
+MULTI_KEYS = {'autre_formateur', 'autre_admin'}
 FORM_KEYS = {t[0] for t in FORMATEUR_TYPES}
 ALL_KEYS = FORM_KEYS | {t[0] for t in ADMIN_TYPES}
 EXPIRY_REQUIRED = {t[0] for t in FORMATEUR_TYPES + ADMIN_TYPES if t[3]}
@@ -65,7 +68,7 @@ def _err(msg, code=400):
 
 
 def types_payload():
-    f = lambda L: [{'key': k, 'label': l, 'court': c, 'expiry': e} for k, l, c, e in L]
+    f = lambda L: [{'key': k, 'label': l, 'court': c, 'expiry': e, 'multi': k in MULTI_KEYS} for k, l, c, e in L]
     return {'formateur': f(FORMATEUR_TYPES), 'admin': f(ADMIN_TYPES)}
 
 
@@ -214,7 +217,7 @@ def _active_doc(fid, dtype):
     return rows[0] if rows else None
 
 
-DOC_COLS = 'id,formateur_id,type,nom_original,mime,taille,date_expiration,depose_par,deverrouille,archive,created_at'
+DOC_COLS = 'id,formateur_id,type,libelle,nom_original,mime,taille,date_expiration,depose_par,deverrouille,archive,created_at'
 
 
 def _docs(fid, with_archive=False):
@@ -237,7 +240,7 @@ def _put_profil(fid, profil, by):
        prefer='resolution=merge-duplicates,return=minimal')
 
 
-def _save_doc(fid, dtype, f, depose_par, date_exp):
+def _save_doc(fid, dtype, f, depose_par, date_exp, libelle=''):
     if dtype not in ALL_KEYS:
         raise DossierError('Type de document inconnu.')
     if depose_par == 'formateur' and dtype not in FORM_KEYS:
@@ -246,6 +249,9 @@ def _save_doc(fid, dtype, f, depose_par, date_exp):
         raise DossierError("Date d'expiration invalide.")
     if dtype in EXPIRY_REQUIRED and not date_exp:
         raise DossierError("Indiquez la date d'expiration.")
+    libelle = re.sub(r'\s+', ' ', libelle or '').strip()[:80]
+    if dtype in MULTI_KEYS and not libelle:
+        raise DossierError('Donnez un nom à ce document.')
     if not f:
         raise DossierError('Aucun fichier reçu.')
     data = f.read(MAX_BYTES + 1)
@@ -256,7 +262,7 @@ def _save_doc(fid, dtype, f, depose_par, date_exp):
     ext, mime = _sniff(data)
     if not ext:
         raise DossierError('Format non accepté (PDF, JPG ou PNG uniquement).')
-    actif = _active_doc(fid, dtype)
+    actif = None if dtype in MULTI_KEYS else _active_doc(fid, dtype)
     if actif and depose_par == 'formateur' and not actif.get('deverrouille'):
         raise DossierError('Document verrouillé. Pour le modifier, contactez Swiss ViTa Form.', 403)
     path = f'{fid}/{dtype}/{uuid.uuid4().hex}.{ext}'
@@ -266,7 +272,7 @@ def _save_doc(fid, dtype, f, depose_par, date_exp):
             sb('PATCH', 'formateur_dossier_docs', {'id': 'eq.' + actif['id']}, {'archive': True, 'deverrouille': False},
                prefer='return=minimal')
         row = sb('POST', 'formateur_dossier_docs', body={
-            'formateur_id': fid, 'type': dtype, 'storage_path': path,
+            'formateur_id': fid, 'type': dtype, 'libelle': libelle or None, 'storage_path': path,
             'nom_original': re.sub(r'[^\w.\- ]', '_', (f.filename or 'document'))[:120],
             'mime': mime, 'taille': len(data), 'date_expiration': date_exp or None,
             'depose_par': depose_par}, prefer='return=representation')
@@ -405,7 +411,7 @@ def register_dossier_routes(app):
     def d_me_upload(dtype):
         fid = g.claims['sub']
         upload_guard()
-        d = _save_doc(fid, dtype, request.files.get('fichier'), 'formateur', (request.form.get('date_expiration') or '').strip())
+        d = _save_doc(fid, dtype, request.files.get('fichier'), 'formateur', (request.form.get('date_expiration') or '').strip(), request.form.get('libelle'))
         log('formateur', fid, fid, 'depot_' + dtype, d['id'])
         return jsonify(d)
 
@@ -443,6 +449,8 @@ def register_dossier_routes(app):
         docs = sb('GET', 'formateur_dossier_docs', {'archive': 'eq.false', 'select': DOC_COLS}) or []
         by = {}
         for d in docs:
+            if d['type'] in MULTI_KEYS:
+                continue
             by.setdefault(d['formateur_id'], {})[d['type']] = {k: d[k] for k in ('id', 'date_expiration', 'deverrouille', 'depose_par', 'created_at')}
         out = []
         for f in forms:
@@ -476,7 +484,7 @@ def register_dossier_routes(app):
     def d_admin_upload(fid, dtype):
         fid = _uuid(fid)
         upload_guard()
-        d = _save_doc(fid, dtype, request.files.get('fichier'), 'admin', (request.form.get('date_expiration') or '').strip())
+        d = _save_doc(fid, dtype, request.files.get('fichier'), 'admin', (request.form.get('date_expiration') or '').strip(), request.form.get('libelle'))
         log('admin', 'admin', fid, 'depot_' + dtype, d['id'])
         return jsonify(d)
 
