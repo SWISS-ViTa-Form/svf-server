@@ -15,7 +15,7 @@ from documents_pdf import register_document_routes
 from dossier_routes import register_dossier_routes
 
 app = Flask(__name__)
-CORS(app, origins=['https://portail.swissvf.ch', 'https://client-svf.netlify.app'])
+CORS(app, origins=['https://portail.swissvf.ch', 'https://svf-portail.pages.dev'])
 
 CERT_COMPLET = base64.b64decode(open('/app/cert_complet.b64').read())
 CERT_COMPACT = base64.b64decode(open('/app/cert_compact.b64').read())
