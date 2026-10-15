@@ -42,10 +42,12 @@ ADMIN_TYPES = [
     ('avenant', 'Avenant au contrat', 'Avenant', False),
     ('autre_admin', 'Autres documents (à nommer)', 'Autre', False),
 ]
-# types où l'on peut déposer plusieurs documents, chacun avec son nom
-MULTI_KEYS = {'autre_formateur', 'autre_admin'}
 FORM_KEYS = {t[0] for t in FORMATEUR_TYPES}
 ALL_KEYS = FORM_KEYS | {t[0] for t in ADMIN_TYPES}
+# Tous les types acceptent PLUSIEURS documents (ajout toujours possible, jamais de remplacement).
+MULTI_KEYS = set(ALL_KEYS)
+# "Autres documents" : un nom est obligatoire
+OTHER_KEYS = {'autre_formateur', 'autre_admin'}
 EXPIRY_REQUIRED = {t[0] for t in FORMATEUR_TYPES + ADMIN_TYPES if t[3]}
 PROFIL_FIELDS = ['civilite', 'date_naissance', 'adresse', 'npa_localite', 'telephone',
                  'avs_no', 'iban', 'banque_nom', 'banque_adresse']
@@ -68,7 +70,7 @@ def _err(msg, code=400):
 
 
 def types_payload():
-    f = lambda L: [{'key': k, 'label': l, 'court': c, 'expiry': e, 'multi': k in MULTI_KEYS} for k, l, c, e in L]
+    f = lambda L: [{'key': k, 'label': l, 'court': c, 'expiry': e, 'multi': True, 'named': k in OTHER_KEYS} for k, l, c, e in L]
     return {'formateur': f(FORMATEUR_TYPES), 'admin': f(ADMIN_TYPES)}
 
 
@@ -250,7 +252,7 @@ def _save_doc(fid, dtype, f, depose_par, date_exp, libelle=''):
     if dtype in EXPIRY_REQUIRED and not date_exp:
         raise DossierError("Indiquez la date d'expiration.")
     libelle = re.sub(r'\s+', ' ', libelle or '').strip()[:80]
-    if dtype in MULTI_KEYS and not libelle:
+    if dtype in OTHER_KEYS and not libelle:
         raise DossierError('Donnez un nom à ce document.')
     if not f:
         raise DossierError('Aucun fichier reçu.')
@@ -449,7 +451,7 @@ def register_dossier_routes(app):
         docs = sb('GET', 'formateur_dossier_docs', {'archive': 'eq.false', 'select': DOC_COLS}) or []
         by = {}
         for d in docs:
-            if d['type'] in MULTI_KEYS:
+            if d['type'] in OTHER_KEYS:
                 continue
             by.setdefault(d['formateur_id'], {})[d['type']] = {k: d[k] for k in ('id', 'date_expiration', 'deverrouille', 'depose_par', 'created_at')}
         out = []
