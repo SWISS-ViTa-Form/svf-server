@@ -5,36 +5,36 @@ from zoneinfo import ZoneInfo
 
 MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
 
-# {p} = prénom, {m} = mois de la fiche. Formulations neutres (valables pour formateurs et formatrices).
+# {p} = prénom, {m} = mois de la fiche. Formulations neutres (valables pour formateurs et formatrices), tutoiement.
 REMERCIEMENTS = [
-    "Merci du fond du cœur pour votre travail en {m}. Chaque cours que vous donnez, c'est un peu plus de monde prêt à agir le jour où ça compte vraiment.",
-    "Un grand merci pour votre engagement en {m}. Votre énergie et votre sérieux font la différence, et les participants le sentent.",
-    "Merci pour tout ce que vous avez apporté à Swiss ViTa Form en {m}. C'est un vrai plaisir de compter sur vous.",
-    "Bravo et merci pour {m} ! Votre façon de transmettre ces gestes qui sauvent est précieuse, et elle ne passe pas inaperçue.",
-    "Merci d'avoir donné de votre temps et de votre énergie en {m}. Grâce à vous, des gens repartent avec la confiance d'oser agir.",
-    "Un immense merci pour votre travail en {m}. Savoir que les formations sont entre de si bonnes mains, c'est un vrai confort.",
-    "Merci pour votre disponibilité et votre bonne humeur en {m}. Elles comptent autant que le contenu des cours.",
-    "Merci, tout simplement, pour {m}. Ce que vous faites sur le terrain, avec les participants, c'est le cœur de Swiss ViTa Form.",
-    "Merci pour votre professionnalisme en {m}. Former, rassurer, motiver : vous faites tout cela à la fois, et très bien.",
-    "Un grand merci pour votre implication en {m}. Les retours des participants parlent d'eux-mêmes, continuez comme ça !",
-    "Merci pour votre belle énergie en {m}. Vous contribuez directement à rendre notre région un peu plus sûre.",
-    "Merci d'avoir fait vivre les cours en {m}. Ce n'est pas toujours simple, et vous le faites avec brio.",
-    "Merci pour votre fiabilité et votre enthousiasme en {m}. Travailler avec vous, c'est un plaisir et une chance.",
-    "Merci pour le temps que vous consacrez à transmettre ces gestes essentiels. {m} n'a pas fait exception, et c'était top !",
+    "Merci du fond du cœur pour ton travail en {m}. Chaque cours que tu donnes, c'est un peu plus de monde prêt à agir le jour où ça compte vraiment.",
+    "Un grand merci pour ton engagement en {m}. Ton énergie et ton sérieux font la différence, et les participants le sentent.",
+    "Merci pour tout ce que tu as apporté à Swiss ViTa Form en {m}. C'est un vrai plaisir de pouvoir compter sur toi.",
+    "Bravo et merci pour {m} ! Ta façon de transmettre ces gestes qui sauvent est précieuse, et elle ne passe pas inaperçue.",
+    "Merci d'avoir donné de ton temps et de ton énergie en {m}. Grâce à toi, des gens repartent avec la confiance d'oser agir.",
+    "Un immense merci pour ton travail en {m}. Savoir que les formations sont entre de si bonnes mains, c'est un vrai confort.",
+    "Merci pour ta disponibilité et ta bonne humeur en {m}. Elles comptent autant que le contenu des cours.",
+    "Merci, tout simplement, pour {m}. Ce que tu fais sur le terrain avec les participants, c'est le cœur de Swiss ViTa Form.",
+    "Merci pour ton professionnalisme en {m}. Former, rassurer, motiver : tu fais tout cela à la fois, et très bien.",
+    "Un grand merci pour ton implication en {m}. Les retours des participants parlent d'eux-mêmes, continue comme ça !",
+    "Merci pour ta belle énergie en {m}. Tu contribues directement à rendre notre région un peu plus sûre.",
+    "Merci d'avoir fait vivre les cours en {m}. Ce n'est pas toujours simple, et tu le fais avec brio.",
+    "Merci pour ta fiabilité et ton enthousiasme en {m}. Travailler avec toi, c'est un plaisir et une chance.",
+    "Merci pour le temps que tu consacres à transmettre ces gestes essentiels. {m} n'a pas fait exception, et c'était top !",
 ]
 
 PIECE_JOINTE = [
-    "Vous trouverez votre fiche de salaire de {m} {a} en pièce jointe.",
-    "Votre fiche de salaire de {m} {a} est jointe à ce message.",
-    "Voici, en pièce jointe, votre fiche de salaire pour {m} {a}.",
-    "Ci-joint votre fiche de salaire de {m} {a}.",
+    "Tu trouveras ta fiche de salaire de {m} {a} en pièce jointe.",
+    "Ta fiche de salaire de {m} {a} est jointe à ce message.",
+    "Voici, en pièce jointe, ta fiche de salaire pour {m} {a}.",
+    "Ci-joint ta fiche de salaire de {m} {a}.",
 ]
 
 FIN = [
-    "Une question ou une remarque sur la fiche ? Répondez simplement à cet e-mail.",
-    "Si quelque chose vous semble bizarre sur la fiche, écrivez-moi, on regarde ça ensemble.",
-    "Un doute sur un montant ? N'hésitez pas à me répondre directement.",
-    "Elle est aussi disponible à tout moment dans votre espace du portail.",
+    "Une question ou une remarque sur la fiche ? Réponds simplement à cet e-mail.",
+    "Si quelque chose te semble bizarre sur la fiche, écris-moi, on regarde ça ensemble.",
+    "Un doute sur un montant ? N'hésite pas à me répondre directement.",
+    "Elle est aussi disponible à tout moment dans ton espace du portail.",
 ]
 
 # Une petite phrase par mois (sans attribution : phrases d'inspiration maison).
@@ -44,12 +44,12 @@ PHRASES = {
     3: "Le printemps arrive : tout ce qu'on sème aujourd'hui sauvera peut-être quelqu'un demain.",
     4: "Un petit geste appris peut tout changer. À chaque cours, un cœur de plus saura quoi faire.",
     5: "Mai, le mois où tout renaît : et si on donnait à quelqu'un l'envie d'apprendre à sauver ?",
-    6: "Les journées sont longues, les sourires aussi. Profitez de la lumière de juin.",
-    7: "Le repos fait partie du travail bien fait. Profitez de l'été, vous l'avez mérité.",
+    6: "Les journées sont longues, les sourires aussi. Profite de la lumière de juin.",
+    7: "Le repos fait partie du travail bien fait. Profite de l'été, tu l'as mérité.",
     8: "Même au soleil, un bon formateur ou une bonne formatrice garde l'œil ouvert… et la trousse de secours à portée de main.",
     9: "La rentrée, c'est l'occasion de repartir avec l'énergie des tout premiers jours.",
-    10: "En octobre, les arbres nous montrent qu'on peut tout lâcher et rester magnifique. Prenez soin de vous.",
-    11: "Quand les jours raccourcissent, ce sont les petites lumières qui comptent. La vôtre en est une.",
+    10: "En octobre, les arbres nous montrent qu'on peut tout lâcher et rester magnifique. Prends soin de toi.",
+    11: "Quand les jours raccourcissent, ce sont les petites lumières qui comptent. La tienne en est une.",
     12: "Donner de son temps est le plus beau des cadeaux. Merci d'écrire cette aventure avec nous, et de très belles fêtes !",
 }
 
@@ -112,5 +112,5 @@ def build_fiche_salaire_email(formateur_nom, mois_label, annee, email='', now=No
         </div>
     </div>
     """
-    subject = f"Votre fiche de salaire de {m} {annee} 💛"
+    subject = f"Ta fiche de salaire de {m} {annee} 💛"
     return subject, html
