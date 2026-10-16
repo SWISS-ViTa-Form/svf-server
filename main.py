@@ -13,6 +13,7 @@ from reportlab.lib.utils import ImageReader
 from pypdf import PdfReader, PdfWriter
 from documents_pdf import register_document_routes
 from dossier_routes import register_dossier_routes
+from anniversaires_routes import register_anniversaires_routes
 from mail_fiche_salaire import build_fiche_salaire_email
 
 app = Flask(__name__)
@@ -361,6 +362,7 @@ BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
 # Devis & factures (PDF + envoi email + QR-facture)
 register_document_routes(app, LOGO_SVF, BREVO_API_KEY)
 register_dossier_routes(app)
+register_anniversaires_routes(app, BREVO_API_KEY)
 
 def send_email_formateur(formateur_email, formateur_nom, cours_data):
     """Envoyer un email de notification au formateur"""
