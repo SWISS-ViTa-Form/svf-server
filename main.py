@@ -13,6 +13,7 @@ from reportlab.lib.utils import ImageReader
 from pypdf import PdfReader, PdfWriter
 from documents_pdf import register_document_routes
 from dossier_routes import register_dossier_routes
+from mail_fiche_salaire import build_fiche_salaire_email
 
 app = Flask(__name__)
 CORS(app, origins=['https://portail.swissvf.ch', 'https://svf-portail.pages.dev'])
@@ -1124,29 +1125,12 @@ def send_email_fiche_salaire(formateur_email, formateur_nom, mois_label, annee, 
     if not formateur_email:
         return False, 'email manquant'
 
-    html_content = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: #c0392b; padding: 20px; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 24px;">SWISS ViTa Form</h1>
-            <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">Fiche de salaire</p>
-        </div>
-        <div style="padding: 30px; background: #f9f9f9;">
-            <p>Bonjour {formateur_nom},</p>
-            <p>Veuillez trouver ci-joint votre fiche de salaire pour <strong>{mois_label} {annee}</strong>.</p>
-            <div style="text-align: center; margin: 24px 0;">
-                <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Acceder au portail</a>
-            </div>
-        </div>
-        <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
-            Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
-        </div>
-    </div>
-    """
+    sujet, html_content = build_fiche_salaire_email(formateur_nom, mois_label, annee, formateur_email)
 
     payload = {
         "sender": {"name": "Swiss ViTa Form", "email": "info@swissvf.ch"},
         "to": [{"email": formateur_email, "name": formateur_nom}],
-        "subject": f"Fiche de salaire — {mois_label} {annee}",
+        "subject": sujet,
         "htmlContent": html_content,
         "attachment": [{"content": pdf_base64, "name": filename}]
     }
