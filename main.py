@@ -15,6 +15,12 @@ from documents_pdf import register_document_routes
 from dossier_routes import register_dossier_routes
 from anniversaires_routes import register_anniversaires_routes
 from mail_fiche_salaire import build_fiche_salaire_email
+from attestation_pdf import build_attestation_pdf
+
+
+def is_cours_src(cours):
+    """Seuls les cours BLS-AED-SRC donnent droit au certificat SRC."""
+    return 'BLS-AED-SRC' in (cours or '')
 
 app = Flask(__name__)
 CORS(app, origins=['https://portail.swissvf.ch', 'https://svf-portail.pages.dev'])
@@ -321,7 +327,15 @@ def generate_cert():
             if field not in data:
                 return jsonify({'error': f'Champ manquant: {field}'}), 400
 
-        if 'Complet' in data['cours']:
+        cours = data['cours'] or ''
+        if not is_cours_src(cours):
+            # Cours non certifié SRC (pédiatrie, sur mesure...) : attestation de participation
+            pdf_bytes = build_attestation_pdf(data, LOGO_SVF, normalize_civilite(data['civilite']))
+            filename = f"Attestation_{data['prenom']}_{data['nom']}.pdf"
+            return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
+                             as_attachment=True, download_name=filename)
+
+        if 'Complet' in cours:
             docx_bytes = fill_complet(data)
         else:
             docx_bytes = fill_compact(data)
