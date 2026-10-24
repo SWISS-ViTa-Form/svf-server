@@ -13,6 +13,7 @@ from reportlab.lib.utils import ImageReader
 from pypdf import PdfReader, PdfWriter
 from documents_pdf import register_document_routes
 from dossier_routes import register_dossier_routes
+from accueil_routes import register_accueil_routes
 from anniversaires_routes import register_anniversaires_routes
 from mail_fiche_salaire import build_fiche_salaire_email
 from attestation_pdf import build_attestation_pdf
@@ -23,7 +24,7 @@ def is_cours_src(cours):
     return 'BLS-AED-SRC' in (cours or '')
 
 app = Flask(__name__)
-CORS(app, origins=['https://portail.swissvf.ch', 'https://svf-portail.pages.dev'])
+CORS(app, origins=['https://portail.swissvf.ch', 'https://svf-portail.pages.dev'], expose_headers=['X-Token'])
 
 CERT_COMPLET = base64.b64decode(open('/app/cert_complet.b64').read())
 CERT_COMPACT = base64.b64decode(open('/app/cert_compact.b64').read())
@@ -376,6 +377,7 @@ BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
 # Devis & factures (PDF + envoi email + QR-facture)
 register_document_routes(app, LOGO_SVF, BREVO_API_KEY)
 register_dossier_routes(app)
+register_accueil_routes(app, convert_to_pdf, BREVO_API_KEY)
 register_anniversaires_routes(app, BREVO_API_KEY)
 
 def send_email_formateur(formateur_email, formateur_nom, cours_data):
@@ -674,6 +676,9 @@ def webhook_new_formateur():
         data = request.json or {}
         # Supabase envoie {"type":"INSERT","table":"formateurs","record":{...}}
         record = data.get('record', data)
+        # Nouvel instructeur créé avec parcours d'accueil : l'e-mail de bienvenue est envoyé par /accueil
+        if record.get('accueil_statut') == 'en_cours':
+            return jsonify({'status': 'skipped', 'reason': 'parcours accueil'})
 
         formateur_email = record.get('email', '')
         prenom = record.get('prenom', '')

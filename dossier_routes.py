@@ -50,7 +50,10 @@ MULTI_KEYS = set(ALL_KEYS)
 OTHER_KEYS = {'autre_formateur', 'autre_admin'}
 EXPIRY_REQUIRED = {t[0] for t in FORMATEUR_TYPES + ADMIN_TYPES if t[3]}
 PROFIL_FIELDS = ['civilite', 'date_naissance', 'adresse', 'npa_localite', 'telephone',
-                 'avs_no', 'iban', 'banque_nom', 'banque_adresse']
+                 'avs_no', 'iban', 'banque_nom', 'banque_adresse',
+                 # ajoutés pour le parcours d'accueil (fiche d'informations instructeur)
+                 'nationalite', 'lieu_origine', 'etat_civil', 'canton_pays', 'banque_titulaire',
+                 'profession', 'taille_tshirt', 'coupe_tshirt', 'qualifications']
 DATE_RE = re.compile(r'\d{4}-\d{2}-\d{2}')
 
 try:
@@ -176,18 +179,19 @@ def dec(txt):
         raise DossierError('Données illisibles (clé de chiffrement différente ?).', 500)
 
 
-def clean_profil(d, strict=True):
-    out = {k: str(d.get(k) or '').strip()[:200] for k in PROFIL_FIELDS}
+def clean_profil(d, strict=True, partial=False):
+    keys = [k for k in PROFIL_FIELDS if k in d] if partial else PROFIL_FIELDS
+    out = {k: str(d.get(k) or '').strip()[:200] for k in keys}
     if not strict:
         return out
-    if out['avs_no'] and not re.fullmatch(r'756\.\d{4}\.\d{4}\.\d{2}', out['avs_no']):
+    if out.get('avs_no') and not re.fullmatch(r'756\.\d{4}\.\d{4}\.\d{2}', out['avs_no']):
         raise DossierError('N° AVS invalide (format 756.1234.5678.90).')
-    if out['iban']:
+    if out.get('iban'):
         iban = re.sub(r'\s', '', out['iban']).upper()
         if not re.fullmatch(r'[A-Z]{2}\d{2}[A-Z0-9]{11,30}', iban):
             raise DossierError('IBAN invalide.')
         out['iban'] = ' '.join(iban[i:i + 4] for i in range(0, len(iban), 4))
-    if out['date_naissance'] and not DATE_RE.fullmatch(out['date_naissance']):
+    if out.get('date_naissance') and not DATE_RE.fullmatch(out['date_naissance']):
         raise DossierError('Date de naissance invalide.')
     return out
 
@@ -236,16 +240,24 @@ def _get_profil(fid):
     return dec(rows[0]['profil_enc']), rows[0].get('updated_at')
 
 
+def _merge_profil(fid, partiel):
+    cur, _ = _get_profil(fid)
+    cur = dict(cur or {})
+    cur.update(partiel)
+    return cur
+
+
 def _put_profil(fid, profil, by):
     sb('POST', 'formateur_dossier_profil', body={'formateur_id': fid, 'profil_enc': enc(profil),
                                                   'updated_at': _now().isoformat(), 'updated_by': by},
        prefer='resolution=merge-duplicates,return=minimal')
 
 
-def _save_doc(fid, dtype, f, depose_par, date_exp, libelle=''):
+def _save_doc(fid, dtype, f, depose_par, date_exp, libelle='', allow_admin_types=False):
     if dtype not in ALL_KEYS:
         raise DossierError('Type de document inconnu.')
-    if depose_par == 'formateur' and dtype not in FORM_KEYS:
+    # allow_admin_types : utilisé uniquement par le parcours d'accueil (dépôt du contrat/règlement/avenant signés)
+    if depose_par == 'formateur' and dtype not in FORM_KEYS and not allow_admin_types:
         raise DossierError('Ce document est ajouté par Swiss ViTa Form.', 403)
     if date_exp and not DATE_RE.fullmatch(date_exp):
         raise DossierError("Date d'expiration invalide.")
@@ -404,7 +416,7 @@ def register_dossier_routes(app):
     @guard('formateur')
     def d_me_profil():
         fid = g.claims['sub']
-        _put_profil(fid, clean_profil(body()), 'formateur')
+        _put_profil(fid, _merge_profil(fid, clean_profil(body(), partial=True)), 'formateur')
         log('formateur', fid, fid, 'modif_profil')
         return jsonify({'status': 'ok'})
 
@@ -477,7 +489,7 @@ def register_dossier_routes(app):
     @guard('admin')
     def d_admin_profil(fid):
         fid = _uuid(fid)
-        _put_profil(fid, clean_profil(body()), 'admin')
+        _put_profil(fid, _merge_profil(fid, clean_profil(body(), partial=True)), 'admin')
         log('admin', 'admin', fid, 'modif_profil')
         return jsonify({'status': 'ok'})
 
