@@ -27,9 +27,15 @@ import dossier_routes as D
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELES = os.path.join(HERE, 'modeles')
-F_CONTRAT = os.path.join(MODELES, 'contrat_travail.docx')
-F_AVENANT = os.path.join(MODELES, 'avenant_apport.docx')
-F_REGLEMENT = os.path.join(MODELES, 'reglement_instructeurs.pdf')
+def _chemin(nom):
+    # Cherche le modèle dans modeles/ puis à la racine du dépôt
+    p = os.path.join(MODELES, nom)
+    return p if os.path.isfile(p) else os.path.join(HERE, nom)
+
+
+F_CONTRAT = _chemin('contrat_travail.docx')
+F_AVENANT = _chemin('avenant_apport.docx')
+F_REGLEMENT = _chemin('reglement_instructeurs.pdf')
 ADMIN_MAIL = os.environ.get('ADMIN_NOTIF_EMAIL', 'info@swissvf.ch')
 
 LECTURES = {
@@ -196,9 +202,16 @@ def _valeurs(f, profil, acc):
     }
 
 
+def _modele(path):
+    if not os.path.isfile(path):
+        raise D.DossierError(f"Modèle introuvable sur le serveur : {os.path.basename(path)}. "
+                             "Vérifie qu'il est bien sur GitHub.", 500)
+    return path
+
+
 def reglement_pdf(nom_complet):
     """Règlement original + nom pré-rempli sur la ligne « Nom et prénom » (la date et la signature restent manuscrites)."""
-    reader = PdfReader(F_REGLEMENT)
+    reader = PdfReader(_modele(F_REGLEMENT))
     writer = PdfWriter()
     for p in reader.pages:
         writer.add_page(p)
@@ -213,6 +226,7 @@ def reglement_pdf(nom_complet):
     except Exception:
         pass
     if pos:
+      try:
         x, y = pos[0]
         w, h = float(last.mediabox.width), float(last.mediabox.height)
         buf = io.BytesIO()
@@ -222,6 +236,8 @@ def reglement_pdf(nom_complet):
         c.save()
         buf.seek(0)
         last.merge_page(PdfReader(buf).pages[0])
+      except Exception as e:
+        print('[accueil] nom non ajouté au règlement:', repr(e))
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()
@@ -293,8 +309,8 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
                 except D.DossierError as e:
                     return D._err(e.msg, e.code)
                 except Exception as e:
-                    print('[accueil] erreur:', repr(e))
-                    return D._err('Erreur serveur.', 500)
+                    import traceback; traceback.print_exc()
+                    return D._err('Erreur serveur (' + type(e).__name__ + ' : ' + str(e)[:160] + ').', 500)
                 # expiration glissante : nouveau jeton à chaque appel réussi
                 try:
                     resp = app.make_response(resp)
@@ -378,7 +394,7 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
             acc['contrat_date'] = date.today().isoformat()
             _patch_accueil(fid, {'contrat_date': acc['contrat_date']})
         vals = _valeurs(f, profil, acc)
-        docx = fill_docx(F_CONTRAT if quoi == 'contrat' else F_AVENANT, vals)
+        docx = fill_docx(_modele(F_CONTRAT if quoi == 'contrat' else F_AVENANT), vals)
         D.log(by, by if by == 'admin' else fid, fid, 'accueil_pdf_' + quoi)
         return _pdf(convert_to_pdf(docx), f"{'Contrat_de_travail' if quoi == 'contrat' else 'Avenant_apport_affaires'}_{nom}.pdf")
 
