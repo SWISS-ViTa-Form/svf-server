@@ -120,14 +120,17 @@ def ligne_rabais(l):
 
 
 def calcul_totaux(doc, lignes):
-    sous = sum((ligne_brut(l) - ligne_rabais(l) for l in lignes), Decimal(0))
-    remise_pct = (sous * _d(doc.get('remise_pct')) / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    # Sous-total = prix avant rabais ; rabais des lignes affiché à part ; réduction globale appliquée ensuite
+    sous = sum((ligne_brut(l) for l in lignes), Decimal(0))
+    rabais_lignes = sum((ligne_rabais(l) for l in lignes), Decimal(0))
+    base = sous - rabais_lignes
+    remise_pct = (base * _d(doc.get('remise_pct')) / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     remise_chf = _d(doc.get('remise_montant')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-    remise = min(remise_pct + remise_chf, sous)
+    remise = min(remise_pct + remise_chf, base)
     taxes = _d(doc.get('taxes'))
-    total = sous - remise + taxes
+    total = base - remise + taxes
     paye = _d(doc.get('montant_paye'))
-    return {'sous_total': sous, 'remise': remise, 'remise_pct': remise_pct, 'remise_chf': remise_chf,
+    return {'sous_total': sous, 'rabais_lignes': rabais_lignes, 'remise': remise, 'remise_pct': remise_pct, 'remise_chf': remise_chf,
             'taxes': taxes, 'total': total, 'paye': paye, 'reste': total - paye}
 
 
@@ -301,8 +304,8 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
         rab = ligne_rabais(l)
         if rab > 0:
             lib = f"{_num(l.get('remise_valeur'))} %" if l.get('remise_type') != 'chf' else ''
-            cell.append(Paragraph(_esc(f"Rabais {lib} : -{_chf(rab)} (au lieu de {_chf(ligne_brut(l))})".replace('  ', ' ')), st_desc))
-        total_l = ligne_brut(l) - rab
+            cell.append(Paragraph(_esc(f"Rabais {lib} : -{_chf(rab)}".replace('  ', ' ')), st_desc))
+        total_l = ligne_brut(l)  # prix avant rabais : le rabais est déduit dans les totaux
         rows.append([cell, Paragraph(_num(_d(l['quantite'])), st_norm),
                      Paragraph(_chf(l['prix_unitaire']), st_norm), Paragraph(_chf(total_l), st_right)])
     t = Table(rows, colWidths=cw, repeatRows=1)
@@ -316,6 +319,8 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
 
     # --- Totaux ---
     lignes_tot = [[Paragraph('Sous-total', st_norm), Paragraph(_chf(tot['sous_total']), st_right)]]
+    if tot['rabais_lignes'] > 0:
+        lignes_tot.append([Paragraph('Rabais', st_norm), Paragraph('-' + _chf(tot['rabais_lignes']), st_right)])
     if tot['remise_pct'] > 0:
         lignes_tot.append([Paragraph(f"Réduction ({_num(doc.get('remise_pct'))} %)", st_norm),
                            Paragraph('-' + _chf(tot['remise_pct']), st_right)])
@@ -411,6 +416,58 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
             pdf = build_document_pdf(doc, lignes, logo_bytes)
             return send_file(io.BytesIO(pdf), mimetype='application/pdf', as_attachment=True,
                              download_name=nom_fichier(doc))
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/conditions-generales', methods=['GET'])
+    def conditions_generales():
+        """Conditions générales en PDF (lien affiché au client avant d'accepter un devis)."""
+        cg_path = os.path.join(_ici, 'conditions_generales.pdf')
+        if not os.path.exists(cg_path):
+            return jsonify({'error': 'Conditions générales introuvables'}), 404
+        return send_file(cg_path, mimetype='application/pdf',
+                         download_name='Conditions_generales_SWISS_ViTa_Form.pdf')
+
+    @app.route('/devis-reponse', methods=['POST'])
+    def devis_reponse():
+        """Prévient SVF quand un client accepte ou refuse un devis depuis son espace client."""
+        try:
+            data = request.json or {}
+            doc, lignes = data.get('document'), data.get('lignes', [])
+            decision = data.get('decision')
+            if not doc or decision not in ('accepte', 'refuse'):
+                return jsonify({'error': 'Données invalides'}), 400
+            tot = calcul_totaux(doc, lignes)
+            numero = numero_affiche(doc['numero'])
+            accepte = decision == 'accepte'
+            revient = accepte and data.get('apres_refus')
+            titre = ('✅ Devis accepté' + (' (après un refus)' if revient else '')) if accepte else '❌ Devis refusé'
+            comm = data.get('commentaire') or ''
+            html = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="background: {'#3b6d11' if accepte else '#a32d2d'}; padding: 18px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 22px;">{titre}</h1>
+              </div>
+              <div style="padding: 24px; background: #f9f9f9;">
+                <p><strong>{_esc(doc.get('client_nom', ''))}</strong> a {'accepté' if accepte else 'refusé'} le devis
+                n° {numero}{(' « ' + _esc(doc.get('titre')) + ' »') if doc.get('titre') else ''}
+                d'un montant de <strong>{_chf(tot['total'])}</strong>.</p>
+                <p>Personne : <strong>{_esc(data.get('nom') or '—')}</strong>
+                {'<br>Conditions générales acceptées.' if accepte else ''}</p>
+                {('<p>Commentaire : <em>' + _esc(comm) + '</em></p>') if comm else ''}
+                <p style="font-size:12px;color:#888">Le statut est déjà à jour dans le portail.</p>
+              </div>
+            </div>"""
+            payload = {
+                'sender': {'name': 'Swiss ViTa Form', 'email': 'info@swissvf.ch'},
+                'to': [{'email': 'info@swissvf.ch', 'name': 'Vincent'}],
+                'subject': f"{'Devis accepté' if accepte else 'Devis refusé'} — n° {numero} — {doc.get('client_nom', '')}",
+                'htmlContent': html,
+            }
+            r = requests.post('https://api.brevo.com/v3/smtp/email',
+                              headers={'api-key': brevo_api_key, 'Content-Type': 'application/json'}, json=payload)
+            print(f'[BREVO devis-reponse] status={r.status_code} body={r.text}')
+            return jsonify({'status': 'sent' if r.status_code == 201 else 'error'})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
