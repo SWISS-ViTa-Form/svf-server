@@ -106,8 +106,21 @@ def _date_fr(v):
     return f'{v.day} {mois[v.month - 1]} {v.year}'
 
 
+def ligne_brut(l):
+    return (_d(l.get('quantite')) * _d(l.get('prix_unitaire'))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def ligne_rabais(l):
+    """Rabais propre à la ligne : en % (remise_type 'pct') ou en CHF ('chf')."""
+    brut, v = ligne_brut(l), _d(l.get('remise_valeur'))
+    if v <= 0 or brut <= 0:
+        return Decimal(0)
+    r = v if l.get('remise_type') == 'chf' else brut * v / 100
+    return min(brut, r.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
 def calcul_totaux(doc, lignes):
-    sous = sum((_d(l.get('quantite')) * _d(l.get('prix_unitaire')) for l in lignes), Decimal(0))
+    sous = sum((ligne_brut(l) - ligne_rabais(l) for l in lignes), Decimal(0))
     remise_pct = (sous * _d(doc.get('remise_pct')) / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     remise_chf = _d(doc.get('remise_montant')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     remise = min(remise_pct + remise_chf, sous)
@@ -285,7 +298,11 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
             desc = (desc + ' *OFFERT*').strip()
         if desc:
             cell.append(Paragraph(_esc(desc), st_desc))
-        total_l = _d(l['quantite']) * _d(l['prix_unitaire'])
+        rab = ligne_rabais(l)
+        if rab > 0:
+            lib = f"{_num(l.get('remise_valeur'))} %" if l.get('remise_type') != 'chf' else ''
+            cell.append(Paragraph(_esc(f"Rabais {lib} : -{_chf(rab)} (au lieu de {_chf(ligne_brut(l))})".replace('  ', ' ')), st_desc))
+        total_l = ligne_brut(l) - rab
         rows.append([cell, Paragraph(_num(_d(l['quantite'])), st_norm),
                      Paragraph(_chf(l['prix_unitaire']), st_norm), Paragraph(_chf(total_l), st_right)])
     t = Table(rows, colWidths=cw, repeatRows=1)
