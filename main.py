@@ -1060,7 +1060,7 @@ def geocode_ors(address):
         params={
             'api_key': ORS_API_KEY, 'text': address, 'size': 1,
             'boundary.country': 'CH',
-            'layers': 'address,street,venue',
+            'layers': 'address,street,venue,locality,postalcode',
             'focus.point.lon': 6.9, 'focus.point.lat': 46.7
         },
         timeout=15
@@ -1098,7 +1098,9 @@ def calculate_distance_km():
         )
         resp.raise_for_status()
         route = resp.json()
-        distance_m = route['routes'][0]['summary']['distance']
+        summary = route['routes'][0]['summary']
+        distance_m = summary['distance']
+        duree_min = round(summary.get('duration', 0) / 60)
         km_aller_simple = distance_m / 1000
         km_aller_retour = round(km_aller_simple * 2, 1)
 
@@ -1108,6 +1110,7 @@ def calculate_distance_km():
             'km_aller_simple': round(km_aller_simple, 1),
             'km_aller_retour': km_aller_retour,
             'montant': montant,
+            'duree_min': duree_min,
             'origine_resolue': label1,
             'destination_resolue': label2
         })
