@@ -24,6 +24,7 @@ from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 
 import dossier_routes as D
+import signature_pdf as SIG
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELES = os.path.join(HERE, 'modeles')
@@ -82,6 +83,14 @@ def _taux(total):
     total = round(float(total or 0), 2)
     base = round(total / 1.0833, 2)
     return base, round(total - base, 2), total
+
+
+def _tz_suisse():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo('Europe/Zurich')
+    except Exception:
+        return None
 
 
 def _get_accueil(fid):
@@ -284,6 +293,27 @@ def _new_code(fid):
     return code[:5] + '-' + code[5:], expire.isoformat()
 
 
+class _Fichier:
+    """Fichier en mémoire au format attendu par D._save_doc."""
+    def __init__(self, data, filename):
+        self._b = io.BytesIO(data)
+        self.filename = filename
+
+    def read(self, n=-1):
+        return self._b.read(n)
+
+
+EN_LIGNE = '_signe_en_ligne.pdf'
+LIB_SIGNE = {'contrat': 'Contrat de travail', 'reglement': 'Règlement des instructeurs', 'avenant': "Avenant apport d'affaires"}
+
+
+def _doc_brut(doc_id):
+    rows = D.sb('GET', 'formateur_dossier_docs', {'id': 'eq.' + doc_id, 'select': 'storage_path,mime'}) or []
+    if not rows:
+        raise D.DossierError('Document introuvable.', 404)
+    return D.get_object(rows[0]['storage_path'])
+
+
 # ---------------- routes ----------------
 def register_accueil_routes(app, convert_to_pdf, brevo_key):
     P = '/accueil'
@@ -378,6 +408,10 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
         return jsonify({'manque': e['infos_manque']})
 
     def _doc_pdf(fid, acc, quoi, by):
+        data, nom = _doc_bytes(fid, acc, quoi, by)
+        return _pdf(data, nom)
+
+    def _doc_bytes(fid, acc, quoi, by):
         f = _formateur(fid)
         profil, _ = D._get_profil(fid)
         if by == 'formateur':
@@ -387,7 +421,7 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
         nom = f"{f['prenom']}_{f['nom']}".replace(' ', '_')
         if quoi == 'reglement':
             D.log(by, by if by == 'admin' else fid, fid, 'accueil_pdf_reglement')
-            return _pdf(reglement_pdf(f"{f['prenom']} {f['nom']}"), f'Reglement_instructeurs_{nom}.pdf')
+            return reglement_pdf(f"{f['prenom']} {f['nom']}"), f'Reglement_instructeurs_{nom}.pdf'
         if quoi == 'avenant' and not acc.get('apporteur'):
             raise D.DossierError("Pas d'avenant prévu.", 404)
         if not acc.get('contrat_date'):
@@ -396,7 +430,7 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
         vals = _valeurs(f, profil, acc)
         docx = fill_docx(_modele(F_CONTRAT if quoi == 'contrat' else F_AVENANT), vals)
         D.log(by, by if by == 'admin' else fid, fid, 'accueil_pdf_' + quoi)
-        return _pdf(convert_to_pdf(docx), f"{'Contrat_de_travail' if quoi == 'contrat' else 'Avenant_apport_affaires'}_{nom}.pdf")
+        return convert_to_pdf(docx), f"{'Contrat_de_travail' if quoi == 'contrat' else 'Avenant_apport_affaires'}_{nom}.pdf"
 
     @app.route(P + '/me/pdf/<quoi>', methods=['GET'])
     @guard('formateur')
@@ -422,10 +456,7 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
         D.log('formateur', fid, fid, 'accueil_depot_' + quoi, d['id'])
         return jsonify(d)
 
-    @app.route(P + '/me/terminer', methods=['POST'])
-    @guard('formateur')
-    def a_terminer():
-        fid, acc = me()
+    def _terminer(fid, acc):
         e = _etat(fid, acc)
         if not (e['lectures_ok'] and e['infos_ok'] and e['signes_ok']):
             raise D.DossierError('Il manque encore des étapes.', 409)
@@ -433,12 +464,53 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
             _patch_accueil(fid, {'termine_at': D._now().isoformat()})
             D.sb('PATCH', 'formateurs', {'id': 'eq.' + fid}, {'accueil_statut': 'a_valider'}, prefer='return=minimal')
             f = _formateur(fid)
+            a_contresigner = 'le contrat' + (" et l'avenant" if acc.get('apporteur') else '')
             _brevo(brevo_key, ADMIN_MAIL, 'Swiss ViTa Form',
-                   f"Accueil terminé : {f['prenom']} {f['nom']} — contrat à contresigner",
+                   f"Accueil terminé : {f['prenom']} {f['nom']} — à contresigner",
                    _mail_cadre(f"<p><b>{f['prenom']} {f['nom']}</b> a terminé son parcours d'accueil : documents lus, "
-                               f"fiche d'informations complète, contrat et règlement signés déposés.</p>"
-                               f"<p>À faire : contresigner le contrat dans le portail (onglet Formateurs → Accueil), puis valider.</p>"))
+                               f"fiche d'informations complète, documents signés.</p>"
+                               f"<p>À faire : contresigner {a_contresigner} dans le portail (onglet Formateurs → Accueil), puis valider.</p>"))
             D.log('formateur', fid, fid, 'accueil_termine')
+
+    @app.route(P + '/me/terminer', methods=['POST'])
+    @guard('formateur')
+    def a_terminer():
+        fid, acc = me()
+        _terminer(fid, acc)
+        return jsonify({'status': 'ok'})
+
+    @app.route(P + '/me/signer', methods=['POST'])
+    @guard('formateur')
+    def a_signer():
+        """Signature à l'écran : pose la signature sur chaque document requis, les dépose et termine le parcours."""
+        fid, acc = me()
+        if acc.get('termine_at'):
+            raise D.DossierError('Documents déjà transmis. Pour une correction, contacte Swiss ViTa Form.', 403)
+        b = body()
+        lieu = re.sub(r'\s+', ' ', str(b.get('lieu') or '')).strip()[:60]
+        if len(lieu) < 2:
+            raise D.DossierError('Indique le lieu de signature (ta localité).')
+        if not b.get('accepte'):
+            raise D.DossierError('Coche la case de confirmation avant de signer.')
+        try:
+            png = SIG.png_depuis_dataurl(b.get('signature'))
+        except SIG.SignatureError as e:
+            raise D.DossierError(str(e))
+        profil, _ = D._get_profil(fid)
+        e = _etat(fid, acc, profil)
+        if not (e['lectures_ok'] and e['infos_ok']):
+            raise D.DossierError('Termine d\'abord les étapes 1 et 2.', 409)
+        f = _formateur(fid)
+        nom = f"{f['prenom']} {f['nom']}"
+        quand = D._now().astimezone(_tz_suisse())
+        ip = D._ip()
+        for quoi in e['requis_signes']:
+            data, fichier = _doc_bytes(fid, acc, quoi, 'formateur')
+            signe = SIG.signer_instructeur(quoi, data, png, nom, lieu, quand, ip)
+            d = D._save_doc(fid, quoi, _Fichier(signe, fichier.replace('.pdf', EN_LIGNE)), 'formateur', '',
+                            LIB_SIGNE[quoi] + ' — signé en ligne', allow_admin_types=True)
+            D.log('formateur', fid, fid, 'accueil_signature_en_ligne_' + quoi, d['id'])
+        _terminer(fid, _get_accueil(fid))
         return jsonify({'status': 'ok'})
 
     # ======== admin ========
@@ -504,11 +576,14 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
             docs = D._docs(fid)
             e = _etat(fid, a, profil, docs)
             depuis = a.get('created_at') or ''
-            signes = [{k: d.get(k) for k in ('id', 'type', 'depose_par', 'created_at', 'nom_original')}
+            signes = [{**{k: d.get(k) for k in ('id', 'type', 'depose_par', 'created_at', 'nom_original')},
+                       'en_ligne': (d.get('nom_original') or '').endswith(EN_LIGNE)}
                       for d in docs if d['type'] in SIGNES and (d.get('created_at') or '') >= depuis]
+            a_contresigner = ['contrat'] + (['avenant'] if a.get('apporteur') else [])
+            cs = {t: any(d['type'] == t and d['depose_par'] == 'admin' for d in signes) for t in a_contresigner}
             out.append({'formateur': f, 'accueil': a, 'etat': e, 'dossier_active': bool(auth.get('pwd_hash')),
                         'docs_signes': signes,
-                        'contresigne': any(d['type'] == 'contrat' and d['depose_par'] == 'admin' for d in signes),
+                        'contresigne': all(cs.values()), 'contresignes': cs,
                         'taille_tshirt': (profil.get('taille_tshirt') or '') + (' ' + profil['coupe_tshirt'] if profil.get('coupe_tshirt') else '')})
         return jsonify({'liste': out})
 
@@ -557,6 +632,44 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
             raise D.DossierError('Pas de parcours pour cet instructeur.', 404)
         return _doc_pdf(fid, acc, quoi, 'admin')
 
+    @app.route(P + '/admin/<fid>/contresigner', methods=['POST'])
+    @guard('admin')
+    def a_contresigner(fid):
+        """Contresignature à l'écran du contrat (et de l'avenant) signés en ligne par l'instructeur·trice."""
+        fid = D._uuid(fid)
+        acc = _get_accueil(fid)
+        if not acc:
+            raise D.DossierError('Pas de parcours pour cet instructeur.', 404)
+        try:
+            png = SIG.png_depuis_dataurl(body().get('signature'))
+        except SIG.SignatureError as e:
+            raise D.DossierError(str(e))
+        depuis = acc.get('created_at') or ''
+        docs = D._docs(fid)
+        types = ['contrat'] + (['avenant'] if acc.get('apporteur') else [])
+        quand = D._now().astimezone(_tz_suisse())
+        faits = []
+        for t in types:
+            if any(d['type'] == t and d.get('depose_par') == 'admin' and (d.get('created_at') or '') >= depuis for d in docs):
+                continue  # déjà contresigné
+            src = [d for d in docs if d['type'] == t and d.get('depose_par') == 'formateur'
+                   and (d.get('created_at') or '') >= depuis and (d.get('nom_original') or '').endswith(EN_LIGNE)]
+            if not src:
+                raise D.DossierError(f"{LIB_SIGNE[t]} : pas de version signée en ligne. Dépose plutôt le document contresigné.", 409)
+            signe = SIG.signer_employeur(t, _doc_brut(src[0]['id']), png, 'Vincent Detta', quand)
+            nom = (src[0].get('nom_original') or t + '.pdf').replace(EN_LIGNE, '_signe_par_les_deux_parties.pdf')
+            d = D._save_doc(fid, t, _Fichier(signe, nom), 'admin', '', LIB_SIGNE[t] + ' — signé par les deux parties')
+            D.log('admin', 'admin', fid, 'accueil_contresignature_' + t, d['id'])
+            faits.append(LIB_SIGNE[t].lower())
+        if faits:
+            f = _formateur(fid)
+            if f.get('email'):
+                _brevo(brevo_key, f['email'], f"{f['prenom']} {f['nom']}", 'Tes documents signés — Swiss ViTa Form',
+                       _mail_cadre(f"<p>Salut {escape(f['prenom'])},</p><p>Ton {' et ton '.join(faits)} "
+                                   f"{'sont' if len(faits) > 1 else 'est'} maintenant signé{'s' if len(faits) > 1 else ''} par les deux parties.</p>"
+                                   f"<p>Tu les retrouves à tout moment sur le portail, dans <b>Mon dossier → RH</b>.</p><p>Bienvenue dans l'équipe !<br>Vincent</p>"))
+        return jsonify({'status': 'ok', 'contresignes': faits})
+
     @app.route(P + '/admin/<fid>/valider', methods=['POST'])
     @guard('admin')
     def a_valider(fid):
@@ -566,8 +679,11 @@ def register_accueil_routes(app, convert_to_pdf, brevo_key):
             raise D.DossierError('Pas de parcours pour cet instructeur.', 404)
         docs = D._docs(fid)
         depuis = acc.get('created_at') or ''
-        if not any(d['type'] == 'contrat' and d.get('depose_par') == 'admin' and (d.get('created_at') or '') >= depuis for d in docs):
-            raise D.DossierError("Dépose d'abord le contrat contresigné.", 409)
+        for t, lib in (('contrat', 'le contrat'), ('avenant', "l'avenant")):
+            if t == 'avenant' and not acc.get('apporteur'):
+                continue
+            if not any(d['type'] == t and d.get('depose_par') == 'admin' and (d.get('created_at') or '') >= depuis for d in docs):
+                raise D.DossierError(f"Contresigne ou dépose d'abord {lib} contresigné.", 409)
         # Les fiches de salaire lisent encore ces champs dans la table formateurs : on les recopie.
         profil, _ = D._get_profil(fid)
         D.sb('PATCH', 'formateurs', {'id': 'eq.' + fid}, {
