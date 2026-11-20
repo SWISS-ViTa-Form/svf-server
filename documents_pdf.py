@@ -62,6 +62,7 @@ SOCIETE = {
                'Téléphone : 078 892 02 63', "Numéro d'identification de la société :", 'CHE-108.957.698'],
 }
 # Coordonnées de paiement (identiques aux factures actuelles)
+SUPABASE_STORAGE_PUBLIC = 'https://weguamuhrillncibedap.supabase.co/storage/v1/object/public/'
 QR_IBAN = 'CH31 0076 7000 C561 3150 4'
 QR_CREDITOR = {'name': 'Detta Vincent', 'street': 'Rue des Remparts', 'house_num': '17',
                'pcode': '1400', 'city': 'Yverdon-les-Bains', 'country': 'CH'}
@@ -226,6 +227,21 @@ def _decorer(pdf_bytes, avec_qr, numero=''):
 
 
 def build_document_pdf(doc, lignes, logo_bytes=None):
+    """Devis : on essaie de tout faire tenir sur une page (espacements resserrés si besoin)
+    avant d'accepter une 2e page. Une page qui ne contiendrait que le pied de page n'est jamais produite."""
+    if doc.get('type') == 'facture':
+        return _build_document_pdf(doc, lignes, logo_bytes, 0)
+    from pypdf import PdfReader
+    data = None
+    for serre in (0, 1, 2):
+        data = _build_document_pdf(doc, lignes, logo_bytes, serre)
+        if len(PdfReader(io.BytesIO(data)).pages) == 1:
+            return data
+    return data
+
+
+def _build_document_pdf(doc, lignes, logo_bytes=None, serre=0):
+    ks = (1, 0.6, 0.35)[serre]          # facteur d'espacement vertical
     est_facture = doc['type'] == 'facture'
     avec_qr = False
     numero = numero_affiche(doc['numero'])
@@ -235,7 +251,7 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
                                           fontSize=kw.pop('size', 9), leading=kw.pop('lead', 12.5),
                                           textColor=kw.pop('color', NAVY), **kw)
     st_norm, st_small = s('n'), s('sm', size=8.5, lead=12)
-    st_desc = s('d', size=8, lead=11, color=GREY)
+    st_desc = s('d', size=8 if serre < 2 else 7.5, lead=11 if serre < 2 else 9.8, color=GREY)
     st_right = s('r', alignment=TA_RIGHT)
     st_th = s('th', font=FONT_BOLD, size=7.5, lead=10, color=RED)
     st_th_r = s('thr', font=FONT_BOLD, size=7.5, lead=10, color=RED, alignment=TA_RIGHT)
@@ -244,7 +260,7 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
     titre_doc = 'Facture' if est_facture else 'Devis'
     buf = io.BytesIO()
     pdf = BaseDocTemplate(buf, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm,
-                          topMargin=19 * mm, bottomMargin=19 * mm,
+                          topMargin=(19 if serre < 2 else 15) * mm, bottomMargin=19 * mm,
                           title=f"{titre_doc} n° {numero}", author='SWISS ViTa Form')
     frame = Frame(pdf.leftMargin, pdf.bottomMargin, pdf.width, pdf.height, id='f', leftPadding=0,
                   rightPadding=0, topPadding=0, bottomPadding=0)
@@ -256,7 +272,8 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
     logo = ''
     if logo_bytes:
         w, h = ImageReader(io.BytesIO(logo_bytes)).getSize()
-        logo = Image(io.BytesIO(logo_bytes), width=30 * mm, height=30 * mm * h / w)
+        lw = (30, 26, 22)[serre] * mm
+        logo = Image(io.BytesIO(logo_bytes), width=lw, height=lw * h / w)
     societe = [Paragraph(f'<b>{SOCIETE["nom"]}</b>', s('sn', size=8.5, lead=12, color=DARK))] + \
               [Paragraph(x, s('sg', size=7.5, lead=10.5, color=GREY)) for x in SOCIETE['lignes']]
     droite_w = W * 0.5
@@ -265,33 +282,33 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
     dates = [f"Date d'émission : {_date_fr(doc['date_emission'])}" if est_facture else f"Émis le : {_date_fr(doc['date_emission'])}"]
     if doc.get('date_echeance'):
         dates.append(f"Échéance : {_date_fr(doc['date_echeance'])}" if est_facture else f"Expire le : {_date_fr(doc['date_echeance'])}")
-    droite += [Spacer(1, 1.5 * mm)] + [Paragraph(x, s('dt', size=8, lead=11.5, color=GREY, alignment=TA_RIGHT)) for x in dates]
+    droite += [Spacer(1, 1.5 * mm * ks)] + [Paragraph(x, s('dt', size=8, lead=11.5, color=GREY, alignment=TA_RIGHT)) for x in dates]
     badge = BADGES.get(statut_affiche(doc))
     if badge and not (est_facture and statut_affiche(doc) == 'facture'):
-        droite += [Spacer(1, 2 * mm), Table([['', Paragraph(badge[0], s('bd', size=8, alignment=1))]],
+        droite += [Spacer(1, 2 * mm * ks), Table([['', Paragraph(badge[0], s('bd', size=8, alignment=1))]],
                                colWidths=[droite_w - 22 * mm, 22 * mm],
                                style=[('BACKGROUND', (1, 0), (1, 0), colors.HexColor(badge[1])),
                                       ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
                                       ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0)])]
-    head = Table([[[logo, Spacer(1, 2 * mm)] + societe, droite]], colWidths=[W * 0.5, droite_w])
+    head = Table([[[logo, Spacer(1, 2 * mm * ks)] + societe, droite]], colWidths=[W * 0.5, droite_w])
     head.setStyle(TableStyle([('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 0),
                               ('RIGHTPADDING', (0, 0), (-1, -1), 0)]))
-    story += [head, Spacer(1, 5 * mm),
-              HRFlowable(width='100%', thickness=0.6, color=LINE, spaceAfter=5 * mm)]
+    story += [head, Spacer(1, 5 * mm * ks),
+              HRFlowable(width='100%', thickness=0.6, color=LINE, spaceAfter=5 * mm * ks)]
 
     # --- Client + objet ---
     story += [Paragraph('FACTURER À' if (est_facture and doc.get('client_adresse')) else
-                        'INFOS CLIENT' if est_facture else 'DESTINATAIRE', st_lbl), Spacer(1, 1.5 * mm),
+                        'INFOS CLIENT' if est_facture else 'DESTINATAIRE', st_lbl), Spacer(1, 1.5 * mm * ks),
               Paragraph(f"<b>{_esc(doc['client_nom'])}</b>", s('cn', size=10, lead=14, color=DARK))]
     for k in ('client_email', 'client_adresse', 'client_tel'):
         if doc.get(k):
             story.append(Paragraph(_esc(doc[k]), st_norm))
-    story.append(Spacer(1, 7 * mm))
+    story.append(Spacer(1, 7 * mm * ks))
     if doc.get('titre'):
-        story += [Paragraph(_esc(doc['titre']), s('ft', font=FONT_TITLE, size=14, lead=18, color=RED)), Spacer(1, 4 * mm)]
+        story += [Paragraph(_esc(doc['titre']), s('ft', font=FONT_TITLE, size=14, lead=18, color=RED)), Spacer(1, 4 * mm * ks)]
 
     # --- Tableau des lignes ---
-    cw = [W - 100 * mm, 20 * mm, 38 * mm, 42 * mm]
+    cw = [W - 76 * mm, 18 * mm, 28 * mm, 30 * mm]  # colonne description large = devis plus courts
     rows = [[Paragraph('ARTICLE OU SERVICE', st_th), Paragraph('QUANTITÉ', st_th),
              Paragraph('PRIX', st_th), Paragraph('TOTAL', st_th_r)]]
     for l in sorted(lignes, key=lambda x: x.get('position', 0)):
@@ -312,10 +329,10 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
     t.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('LINEBELOW', (0, 0), (-1, 0), 0.8, FRAME),
-        ('LINEBELOW', (0, 1), (-1, -1), 0.4, LINE), ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6), ('LEFTPADDING', (0, 0), (0, -1), 0),
+        ('LINEBELOW', (0, 1), (-1, -1), 0.4, LINE), ('TOPPADDING', (0, 0), (-1, -1), 6 * ks),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6 * ks), ('LEFTPADDING', (0, 0), (0, -1), 0),
         ('RIGHTPADDING', (-1, 0), (-1, -1), 0)]))
-    story += [t, Spacer(1, 6 * mm)]
+    story += [t, Spacer(1, 6 * mm * ks)]
 
     # --- Totaux ---
     lignes_tot = [[Paragraph('Sous-total', st_norm), Paragraph(_chf(tot['sous_total']), st_right)]]
@@ -342,18 +359,18 @@ def build_document_pdf(doc, lignes, logo_bytes=None):
                              ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
                              ('LEFTPADDING', (0, 0), (0, -1), 0), ('RIGHTPADDING', (-1, 0), (-1, -1), 0),
                              ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
-    story.append(KeepTogether([tt, Spacer(1, 2 * mm), box]))
+    story.append(KeepTogether([tt, Spacer(1, 2 * mm * ks), box]))
 
     # --- Notes / conditions / paiement ---
     notes = (doc.get('notes') or '').strip()
     if not est_facture and 'conditions générales' not in notes.lower():
         notes = (notes + '\n' if notes else '') + 'En acceptant ce devis, vous acceptez nos conditions générales.'
     if notes:
-        story += [Spacer(1, 7 * mm), Paragraph('NOTES', st_lbl), Spacer(1, 1.5 * mm), Paragraph(_esc(notes), st_small)]
-    story.append(Spacer(1, 6 * mm))
+        story += [Spacer(1, 7 * mm * ks), Paragraph('NOTES', st_lbl), Spacer(1, 1.5 * mm * ks), Paragraph(_esc(notes), st_small)]
     if est_facture:
-        gauche = [Paragraph('Merci pour votre confiance,', st_small), Spacer(1, 1.5 * mm),
-                  Paragraph('SWISS ViTa Form.', st_small), Spacer(1, 3 * mm),
+        story.append(Spacer(1, 6 * mm * ks))
+        gauche = [Paragraph('Merci pour votre confiance,', st_small), Spacer(1, 1.5 * mm * ks),
+                  Paragraph('SWISS ViTa Form.', st_small), Spacer(1, 3 * mm * ks),
                   Paragraph(f'Le paiement doit être effectué aux coordonnées suivantes <b>avec la mention du numéro de facture</b> : {numero}', st_small)]
         droite_p = [Paragraph(x, st_small) for x in PAIEMENT]
         bloc = Table([[gauche, droite_p]], colWidths=[W * 0.52, W * 0.48])
@@ -473,11 +490,11 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
 
     @app.route('/send-document', methods=['POST'])
     def send_document():
-        """Envoie le devis/la facture en pièce jointe au client (Brevo)."""
+        """Envoie le devis/la facture au client (Brevo), avec message personnalisé et pièces jointes."""
         try:
             data = request.json or {}
             doc, lignes = data.get('document'), data.get('lignes', [])
-            dest = data.get('destinataire') or (doc or {}).get('client_email')
+            dest = (data.get('destinataire') or (doc or {}).get('client_email') or '').strip()
             if not doc or not dest:
                 return jsonify({'error': 'Document ou destinataire manquant'}), 400
             pdf = build_document_pdf(doc, lignes, logo_bytes)
@@ -485,13 +502,21 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
             est_facture = doc['type'] == 'facture'
             numero = numero_affiche(doc['numero'])
             libelle = 'Facture' if est_facture else 'Devis'
-            note_cg = '' if est_facture else "<p>Nos conditions générales sont jointes à ce devis : en l'acceptant, vous les acceptez.</p>"
-            # Lien portail uniquement si le client a un espace client (flag envoyé par le portail).
-            # Un futur client sans login ne reçoit ni la phrase ni le bouton.
+
+            message = (data.get('message') or '').strip()
+            if message:
+                corps = '<div style="font-size:14px;line-height:1.6;color:#222">' + _esc(message) + '</div>'
+            else:  # ancien texte par défaut (compatibilité)
+                note_cg = '' if est_facture else "<p>Nos conditions générales sont jointes à ce devis : en l'acceptant, vous les acceptez.</p>"
+                corps = f"""<p>Bonjour,</p>
+                <p>Veuillez trouver ci-joint {'la facture' if est_facture else 'le devis'} n° {numero}
+                {('« ' + _esc(doc.get('titre'))) + ' »' if doc.get('titre') else ''}
+                d'un montant de <strong>{_chf(tot['total'])}</strong>.</p>{note_cg}"""
+            # Lien portail uniquement si demandé (client avec espace client)
             bloc_portail = ''
             if data.get('avec_portail'):
-                bloc_portail = """<p>Vous pouvez aussi le retrouver à tout moment sur votre espace client :</p>
-                <div style="text-align: center; margin: 24px 0;">
+                bloc_portail = """<p style="margin-top:20px">Vous pouvez aussi le retrouver à tout moment sur votre espace client :</p>
+                <div style="text-align: center; margin: 20px 0;">
                   <a href="https://portail.swissvf.ch" style="background: #c0392b; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: bold;">Accéder au portail</a>
                 </div>"""
             html = f"""
@@ -501,30 +526,48 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
                 <p style="color: rgba(255,255,255,0.85); margin: 5px 0 0 0;">{libelle} n° {numero}</p>
               </div>
               <div style="padding: 30px; background: #f9f9f9;">
-                <p>Bonjour,</p>
-                <p>Veuillez trouver ci-joint {'la facture' if est_facture else 'le devis'} n° {numero}
-                {('« ' + _esc(doc.get('titre'))) + ' »' if doc.get('titre') else ''}
-                d'un montant de <strong>{_chf(tot['total'])}</strong>.</p>
-                {note_cg}
+                {corps}
                 {bloc_portail}
               </div>
               <div style="background: #f0f0f0; padding: 16px; text-align: center; font-size: 12px; color: #888;">
                 Swiss ViTa Form — Av. Kiener 29, 1400 Yverdon-les-Bains — 078 892 02 63
               </div>
             </div>"""
+            pieces = [{'content': base64.b64encode(pdf).decode(), 'name': nom_fichier(doc)}]
+            # Conditions générales : par défaut sur les devis, au choix sinon
+            joindre_cg = data.get('joindre_cg', not est_facture)
+            cg_path = os.path.join(_ici, 'conditions_generales.pdf')
+            if joindre_cg and os.path.exists(cg_path):
+                with open(cg_path, 'rb') as fh:
+                    pieces.append({'content': base64.b64encode(fh.read()).decode(),
+                                   'name': 'Conditions_generales_SWISS_ViTa_Form.pdf'})
+            # Documents déjà stockés dans le portail (catalogue…) : uniquement depuis le stockage Supabase de SVF
+            for p in (data.get('pieces_url') or [])[:10]:
+                url = (p or {}).get('url') or ''
+                if not url.startswith(SUPABASE_STORAGE_PUBLIC):
+                    return jsonify({'error': f"Document non autorisé : {p.get('nom')}"}), 400
+                rr = requests.get(url, timeout=30)
+                if rr.status_code != 200:
+                    return jsonify({'error': f"Document introuvable : {p.get('nom')}"}), 400
+                pieces.append({'content': base64.b64encode(rr.content).decode(), 'name': p.get('nom') or 'document.pdf'})
+            # Fichiers ajoutés depuis l'ordinateur (déjà en base64)
+            for p in (data.get('pieces_jointes') or [])[:10]:
+                if p and p.get('contenu'):
+                    pieces.append({'content': p['contenu'], 'name': p.get('nom') or 'document'})
+            taille = sum(len(x['content']) * 3 // 4 for x in pieces)
+            if taille > 18 * 1024 * 1024:
+                return jsonify({'error': 'Pièces jointes trop lourdes (max ~18 Mo au total).'}), 400
+
             payload = {
                 'sender': {'name': 'Swiss ViTa Form', 'email': 'info@swissvf.ch'},
+                'replyTo': {'name': 'Vincent Detta — SWISS ViTa Form', 'email': 'info@swissvf.ch'},
                 'to': [{'email': dest, 'name': doc.get('client_nom', '')}],
-                'subject': f'{libelle} n° {numero} — SWISS ViTa Form',
+                'subject': (data.get('sujet') or '').strip() or f'{libelle} n° {numero} — SWISS ViTa Form',
                 'htmlContent': html,
-                'attachment': [{'content': base64.b64encode(pdf).decode(), 'name': nom_fichier(doc)}],
+                'attachment': pieces,
             }
-            # Devis : on joint les conditions générales (conditions_generales.pdf à côté de ce fichier)
-            cg_path = os.path.join(_ici, 'conditions_generales.pdf')
-            if not est_facture and os.path.exists(cg_path):
-                with open(cg_path, 'rb') as fh:
-                    payload['attachment'].append({'content': base64.b64encode(fh.read()).decode(),
-                                                  'name': 'Conditions_generales_SWISS_ViTa_Form.pdf'})
+            if data.get('copie') and dest.lower() != 'info@swissvf.ch':
+                payload['bcc'] = [{'email': 'info@swissvf.ch', 'name': 'SWISS ViTa Form'}]
             r = requests.post('https://api.brevo.com/v3/smtp/email',
                               headers={'api-key': brevo_api_key, 'Content-Type': 'application/json'}, json=payload)
             print(f'[BREVO document] status={r.status_code} body={r.text}')
