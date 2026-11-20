@@ -457,19 +457,28 @@ def register_dossier_routes(app):
     @app.route(P + '/admin/apercu', methods=['GET'])
     @guard('admin')
     def d_admin_apercu():
-        forms = sb('GET', 'formateurs', {'actif': 'eq.true', 'select': 'id,prenom,nom,login,email', 'order': 'nom.asc'}) or []
+        forms = sb('GET', 'formateurs', {'actif': 'eq.true', 'select': 'id,prenom,nom,login,email,accueil_statut', 'order': 'nom.asc'}) or []
         auths = {a['formateur_id']: a for a in (sb('GET', 'formateur_dossier_auth', {'select': 'formateur_id,pwd_hash,code_expire,code_hash'}) or [])}
         profils = {p['formateur_id']: p['updated_at'] for p in (sb('GET', 'formateur_dossier_profil', {'select': 'formateur_id,updated_at'}) or [])}
         docs = sb('GET', 'formateur_dossier_docs', {'archive': 'eq.false', 'select': DOC_COLS}) or []
         by = {}
-        for d in docs:
+        for d in sorted(docs, key=lambda x: x.get('created_at') or ''):
             if d['type'] in OTHER_KEYS:
                 continue
-            by.setdefault(d['formateur_id'], {})[d['type']] = {k: d[k] for k in ('id', 'date_expiration', 'deverrouille', 'depose_par', 'created_at')}
+            cur = by.setdefault(d['formateur_id'], {}).get(d['type'])
+            e = {k: d[k] for k in ('id', 'date_expiration', 'deverrouille', 'depose_par', 'created_at')}
+            # agrégat pour la vue d'ensemble : nombre, déposé par l'instructeur / par SVF, expiration la plus lointaine
+            e['n'] = (cur or {}).get('n', 0) + 1
+            e['par_formateur'] = (cur or {}).get('par_formateur', False) or d['depose_par'] == 'formateur'
+            e['par_admin'] = (cur or {}).get('par_admin', False) or d['depose_par'] == 'admin'
+            exps = [x for x in ((cur or {}).get('date_expiration'), d.get('date_expiration')) if x]
+            e['date_expiration'] = max(exps) if exps else None
+            by[d['formateur_id']][d['type']] = e
         out = []
         for f in forms:
             a = auths.get(f['id']) or {}
             out.append({**f, 'active': bool(a.get('pwd_hash')), 'code_pending': bool(a.get('code_hash')),
+                        'accueil_statut': f.get('accueil_statut'),
                         'profil_updated': profils.get(f['id']), 'docs': by.get(f['id'], {})})
         return jsonify({'formateurs': out, 'types': types_payload()})
 
