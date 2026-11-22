@@ -2,6 +2,7 @@ from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
 import io, os, subprocess, tempfile, base64, requests
 from datetime import datetime
+from html import escape as html_escape
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -705,6 +706,13 @@ def send_email_nouveau_cours_disponible(formateur_email, formateur_nom, cours_da
         return False, 'email manquant'
 
     date_f = datetime.strptime(cours_data['date_cours'], '%Y-%m-%d').strftime('%d.%m.%Y')
+    # Journée en plusieurs sessions : on liste uniquement celles où il manque un instructeur / une instructrice
+    sessions = [str(x) for x in (cours_data.get('sessions_ouvertes') or []) if x][:6]
+    if sessions:
+        horaire_html = ('<tr><td style="padding: 8px 0; color: #888; vertical-align: top;">Sessions ouvertes</td><td style="padding: 8px 0;">'
+                        + '<br>'.join(html_escape(x) for x in sessions) + '</td></tr>')
+    else:
+        horaire_html = f"<tr><td style=\"padding: 8px 0; color: #888;\">Horaire</td><td style=\"padding: 8px 0;\">{cours_data.get('heure_debut', '—')} – {cours_data.get('heure_fin', '—')}</td></tr>"
 
     html_content = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -719,7 +727,7 @@ def send_email_nouveau_cours_disponible(formateur_email, formateur_nom, cours_da
                 <table style="width: 100%; border-collapse: collapse;">
                     <tr><td style="padding: 8px 0; color: #888; width: 140px;">Type de cours</td><td style="padding: 8px 0; font-weight: bold;">{cours_data['type_cours']}</td></tr>
                     <tr><td style="padding: 8px 0; color: #888;">Date</td><td style="padding: 8px 0; font-weight: bold;">{date_f}</td></tr>
-                    <tr><td style="padding: 8px 0; color: #888;">Horaire</td><td style="padding: 8px 0;">{cours_data.get('heure_debut', '—')} – {cours_data.get('heure_fin', '—')}</td></tr>
+                    {horaire_html}
                     <tr><td style="padding: 8px 0; color: #888;">Lieu</td><td style="padding: 8px 0;">{cours_data.get('lieu', '—')}</td></tr>
                 </table>
             </div>
