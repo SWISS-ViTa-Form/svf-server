@@ -17,6 +17,7 @@ from dossier_routes import register_dossier_routes
 from accueil_routes import register_accueil_routes
 from anniversaires_routes import register_anniversaires_routes
 from rappel_facturation import register_rappel_facturation_routes
+from rappels_bls import register_rappels_bls_routes
 from mail_fiche_salaire import build_fiche_salaire_email
 from attestation_pdf import build_attestation_pdf
 
@@ -382,6 +383,7 @@ register_dossier_routes(app)
 register_accueil_routes(app, convert_to_pdf, BREVO_API_KEY)
 register_anniversaires_routes(app, BREVO_API_KEY)
 register_rappel_facturation_routes(app, BREVO_API_KEY)
+register_rappels_bls_routes(app, BREVO_API_KEY)
 
 def send_email_formateur(formateur_email, formateur_nom, cours_data):
     """Envoyer un email de notification au formateur"""
