@@ -65,6 +65,10 @@ def register_anniversaires_routes(app, brevo_key):
         if not hmac.compare_digest(recu.encode(), cron_secret.encode()):
             return jsonify({'error': 'non autorisé'}), 401
 
+        # Le même déclencheur quotidien sert aussi au rappel de facturation du lundi
+        import rappel_facturation
+        rappel_facturation.envoyer_sans_erreur(brevo_key)
+
         # ?date=AAAA-MM-JJ permet de simuler « aujourd'hui » pour tester ; ?test=1 n'enregistre pas l'envoi du jour
         test = request.args.get('test') == '1'
         try:
