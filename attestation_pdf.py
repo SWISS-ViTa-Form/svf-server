@@ -112,17 +112,16 @@ def build_attestation_pdf(data, logo_bytes=None, feminin=False):
         except Exception:
             pass
 
-    _espace(c, 'SWISS VITA FORM', w / 2, top(160), FONT, 8, ROUGE, 2.6)
     _espace(c, 'ATTESTATION', w / 2, top(199), FONT_TITLE, 26, TEXTE, 7)
 
-    _centre(c, 'atteste que', top(240), FONT, 10, TEXTE)
+    _centre(c, 'SWISS ViTa Form atteste que', top(240), FONT, 10, TEXTE)
     _centre(c, 'Madame' if feminin else 'Monsieur', top(261), FONT, 10, TEXTE)
     _centre(c, f"{data.get('prenom', '')} {data.get('nom', '')}".strip(), top(290), FONT_TITLE, 20, ROUGE, gras=True)
     c.setStrokeColor(TRAIT)
     c.setLineWidth(0.7)
     c.line(73, top(301), w - 73, top(301))
 
-    _centre(c, 'A participé au cours', top(345), FONT, 11, TEXTE)
+    _centre(c, 'a participé au cours', top(345), FONT, 11, TEXTE)
     cours = data.get('cours', '')
     lignes = simpleSplit(cours, FONT_BOLD, 11.5, w - 160)
     y = 366
