@@ -46,7 +46,7 @@ def texte(v):
     if isinstance(v, decimal.Decimal):
         return float(v)
     if isinstance(v, (dict, list)):
-        return json.dumps(v, ensure_ascii=False)
+        return json.dumps(v, ensure_ascii=False, default=str)
     if isinstance(v, (bytes, memoryview)):
         return '<binaire>'
     if isinstance(v, uuid.UUID):
