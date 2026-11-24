@@ -1,0 +1,102 @@
+# Sauvegarde complète du portail SWISS ViTa Form, chaque nuit, vers Google Drive.
+# Archive 7z chiffrée (AES-256) : base de données complète + Excel + tous les fichiers.
+# Conservation : 30 jours (dossier "quotidien") + 12 mois (dossier "mensuel", le 1er du mois).
+# Lancement manuel : onglet Actions > Sauvegarde quotidienne > Run workflow.
+
+name: Sauvegarde quotidienne
+
+on:
+  schedule:
+    - cron: '23 1 * * *'   # ~02h23 en hiver, ~03h23 en été (heure suisse)
+  workflow_dispatch:
+
+concurrency: sauvegarde
+
+jobs:
+  sauvegarde:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      DOSSIER_ENC_KEY: ${{ secrets.DOSSIER_ENC_KEY }}
+      BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+      RCLONE_CONFIG_GDRIVE_TYPE: drive
+      RCLONE_CONFIG_GDRIVE_SCOPE: drive
+      RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
+      DOSSIER_DRIVE: gdrive:SVF-Sauvegardes
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier la configuration
+        run: |
+          manque=""
+          for v in SUPABASE_DB_URL SUPABASE_URL SUPABASE_SERVICE_KEY BACKUP_PASSWORD RCLONE_CONFIG_GDRIVE_TOKEN; do
+            [ -n "${!v}" ] || manque="$manque $v"
+          done
+          if [ -n "$manque" ]; then echo "::error::Secrets GitHub manquants :$manque"; exit 1; fi
+          if [ ${#BACKUP_PASSWORD} -lt 12 ]; then echo "::error::BACKUP_PASSWORD doit faire au moins 12 caractères"; exit 1; fi
+
+      - name: Installer les outils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common p7zip-full >/dev/null
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+          curl -fsSL https://rclone.org/install.sh | sudo bash >/dev/null
+          pip install -q "psycopg[binary]" requests openpyxl cryptography
+
+      - name: Copie complète de la base (restaurable)
+        run: |
+          mkdir -p svf
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" -n public --no-owner --no-privileges -Fc -f svf/base.dump
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" -n public --no-owner --no-privileges --schema-only -f svf/structure.sql
+          ls -la svf/base.dump | awk '{print "base.dump : " $5 " octets"}'
+
+      - name: Export Excel + fichiers du stockage
+        run: python sauvegarde/sauvegarde.py svf
+
+      - name: Archive chiffrée
+        run: |
+          JOUR=$(TZ=Europe/Zurich date +%F)
+          echo "NOM=SVF_sauvegarde_${JOUR}.7z" >> "$GITHUB_ENV"
+          7z a -t7z -mx=5 -mhe=on -p"$BACKUP_PASSWORD" "SVF_sauvegarde_${JOUR}.7z" ./svf/* >/dev/null
+          7z t -p"$BACKUP_PASSWORD" "SVF_sauvegarde_${JOUR}.7z" >/dev/null && echo "Archive vérifiée"
+          ls -la "SVF_sauvegarde_${JOUR}.7z" | awk '{printf "Taille : %.1f Mo\n", $5/1e6}'
+
+      - name: Envoi vers Google Drive
+        run: |
+          rclone copy "$NOM" "$DOSSIER_DRIVE/quotidien" --retries 5
+          # le 1er du mois, ou la toute première fois
+          if [ "$(TZ=Europe/Zurich date +%d)" = "01" ] || [ -z "$(rclone lsf "$DOSSIER_DRIVE/mensuel" 2>/dev/null)" ]; then
+            rclone copy "$NOM" "$DOSSIER_DRIVE/mensuel" --retries 5
+            echo "Copie mensuelle faite"
+          fi
+          echo "Envoyé : $NOM"
+
+      - name: Supprimer les anciennes sauvegardes
+        run: |
+          # seulement si la sauvegarde du jour est bien sur le Drive
+          rclone lsf "$DOSSIER_DRIVE/quotidien" | grep -qx "$NOM"
+          rclone delete "$DOSSIER_DRIVE/quotidien" --min-age 31d --drive-use-trash=false
+          rclone delete "$DOSSIER_DRIVE/mensuel" --min-age 370d --drive-use-trash=false
+          echo "Sauvegardes sur le Drive : $(rclone lsf "$DOSSIER_DRIVE/quotidien" | wc -l) quotidiennes, $(rclone lsf "$DOSSIER_DRIVE/mensuel" | wc -l) mensuelles"
+
+      - name: Avertissements
+        run: |
+          if [ -f AVERTISSEMENTS ]; then
+            echo "::error::Sauvegarde envoyée mais incomplète : $(wc -l < AVERTISSEMENTS) problème(s). Voir LISEZMOI.txt dans l'archive."
+            exit 1
+          fi
+
+  # GitHub met en pause les tâches planifiées d'un dépôt public sans activité depuis 60 jours.
+  # Ce petit job les garde actives (sans faire de commit).
+  garder-actif:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - uses: gautamkrishnar/keepalive-workflow@v2
