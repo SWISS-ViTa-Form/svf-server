@@ -1,4 +1,4 @@
-"""Bons cadeaux — cours de premiers secours pour parents et futurs parents, à domicile.
+"""Bons cadeaux — cours de premiers secours pour parents, futurs parents, grands-parents… à domicile.
 
 /bon-cadeau-pdf   : renvoie le PDF du bon (A4 paysage, sans prix)
 /send-bon-cadeau  : envoie le bon par email (message personnalisé), copie cachée à info@swissvf.ch
@@ -27,6 +27,7 @@ ADMIN = 'info@swissvf.ch'
 CONTACT_NOM = 'Pepita Widmer'
 CONTACT_TEL = '079 375 23 14'
 CONTACT_MAIL = 'info@swissvf.ch'
+PUBLIC = 'pour parents, futurs parents, grands-parents et toute personne qui garde des enfants'
 EMAIL_RX = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
@@ -82,8 +83,10 @@ def build_bon_pdf(bon, logo_bytes=None):
     y -= 112
     _espace(c, 'BON CADEAU', y, FONT_TITLE, 38, TEXTE, w, 9)
     y -= 30
-    _centre(c, 'Cours de premiers secours pour parents et futurs parents', y, FONT, 14, ROUGE, w)
-    y -= 20
+    _centre(c, 'Cours de premiers secours', y, FONT, 14, ROUGE, w)
+    y -= 17
+    _centre(c, PUBLIC, y, FONT, 11, ROUGE, w)
+    y -= 19
     _centre(c, f"{duree_libelle(bon.get('duree'))}  ·  à domicile  ·  donné par une infirmière", y, FONT, 10.5, GRIS, w)
 
     # Pour / Offert par
