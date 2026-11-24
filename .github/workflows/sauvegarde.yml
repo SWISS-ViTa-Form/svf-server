@@ -29,7 +29,7 @@ jobs:
       RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
       DOSSIER_DRIVE: gdrive:SVF-Sauvegardes
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Vérifier la configuration
         run: |
@@ -99,4 +99,7 @@ jobs:
     permissions:
       actions: write
     steps:
-      - uses: gautamkrishnar/keepalive-workflow@v2
+      - name: Réactiver la tâche planifiée
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/sauvegarde.yml/enable" && echo "OK"
