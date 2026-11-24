@@ -5,6 +5,7 @@ Intégration dans main.py (2 lignes, après la création de `app` et le chargeme
     register_document_routes(app, LOGO_SVF, BREVO_API_KEY)
 """
 import io
+import re
 import base64
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -306,6 +307,17 @@ def _build_document_pdf(doc, lignes, logo_bytes=None, serre=0):
     story.append(Spacer(1, 7 * mm * ks))
     if doc.get('titre'):
         story += [Paragraph(_esc(doc['titre']), s('ft', font=FONT_TITLE, size=14, lead=18, color=RED)), Spacer(1, 4 * mm * ks)]
+    # Rabais avec motif (ex. partenariat Y-Parc) : mis en évidence sous le titre
+    _motif = str(doc.get('remise_motif') or '').strip()
+    if _motif and (_d(doc.get('remise_pct')) > 0 or _d(doc.get('remise_montant')) > 0):
+        _txt = (f"{_num(doc.get('remise_pct'))} % de rabais — {_esc(_motif)}" if _d(doc.get('remise_pct')) > 0
+                else f"Rabais de {_chf(_d(doc.get('remise_montant')))} — {_esc(_motif)}")
+        bandeau = Table([[Paragraph(f'<b>{_txt}</b>', s('rb', size=10, lead=14, color=RED))]], colWidths=[W])
+        bandeau.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fdf0ee')),
+                                     ('LINEBEFORE', (0, 0), (0, -1), 3, RED),
+                                     ('TOPPADDING', (0, 0), (-1, -1), 6), ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                                     ('LEFTPADDING', (0, 0), (-1, -1), 10)]))
+        story += [bandeau, Spacer(1, 4 * mm * ks)]
 
     # --- Tableau des lignes ---
     cw = [W - 76 * mm, 18 * mm, 28 * mm, 30 * mm]  # colonne description large = devis plus courts
@@ -338,11 +350,14 @@ def _build_document_pdf(doc, lignes, logo_bytes=None, serre=0):
     lignes_tot = [[Paragraph('Sous-total', st_norm), Paragraph(_chf(tot['sous_total']), st_right)]]
     if tot['rabais_lignes'] > 0:
         lignes_tot.append([Paragraph('Rabais', st_norm), Paragraph('-' + _chf(tot['rabais_lignes']), st_right)])
+    motif = str(doc.get('remise_motif') or '').strip()
     if tot['remise_pct'] > 0:
-        lignes_tot.append([Paragraph(f"Réduction ({_num(doc.get('remise_pct'))} %)", st_norm),
-                           Paragraph('-' + _chf(tot['remise_pct']), st_right)])
+        lib = f"Rabais ({_num(doc.get('remise_pct'))} %)" if motif else f"Réduction ({_num(doc.get('remise_pct'))} %)"
+        lignes_tot.append([Paragraph(lib, s('rm', size=9, lead=12, color=RED) if motif else st_norm),
+                           Paragraph('-' + _chf(tot['remise_pct']), s('rmv', size=9, lead=12, color=RED, alignment=TA_RIGHT) if motif else st_right)])
     if tot['remise_chf'] > 0:
-        lignes_tot.append([Paragraph('Réduction', st_norm), Paragraph('-' + _chf(tot['remise_chf']), st_right)])
+        lignes_tot.append([Paragraph('Rabais' if motif and not tot['remise_pct'] > 0 else 'Réduction', st_norm),
+                           Paragraph('-' + _chf(tot['remise_chf']), st_right)])
     if est_facture:
         lignes_tot.append([Paragraph('Taxes', st_norm), Paragraph(_chf(tot['taxes']), st_right)])
         lignes_tot.append([Paragraph('Total de la facture', st_norm), Paragraph(_chf(tot['total']), st_right)])
@@ -566,7 +581,15 @@ def register_document_routes(app, logo_bytes, brevo_api_key):
                 'htmlContent': html,
                 'attachment': pieces,
             }
-            if data.get('copie') and dest.lower() != 'info@swissvf.ch':
+            # Personnes en copie (Cc), visibles par le destinataire — ex. une collègue du client
+            cc, vus = [], {dest.lower()}
+            for e in (data.get('cc') or [])[:5]:
+                e = str(e or '').strip()
+                if re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', e) and e.lower() not in vus:
+                    cc.append({'email': e}); vus.add(e.lower())
+            if cc:
+                payload['cc'] = cc
+            if data.get('copie') and 'info@swissvf.ch' not in vus:
                 payload['bcc'] = [{'email': 'info@swissvf.ch', 'name': 'SWISS ViTa Form'}]
             r = requests.post('https://api.brevo.com/v3/smtp/email',
                               headers={'api-key': brevo_api_key, 'Content-Type': 'application/json'}, json=payload)
