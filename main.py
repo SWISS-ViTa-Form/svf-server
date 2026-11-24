@@ -13,6 +13,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from pypdf import PdfReader, PdfWriter
 from documents_pdf import register_document_routes
+from bons_cadeaux import register_bons_cadeaux_routes
 from dossier_routes import register_dossier_routes
 from accueil_routes import register_accueil_routes
 from anniversaires_routes import register_anniversaires_routes
@@ -379,6 +380,7 @@ BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
 
 # Devis & factures (PDF + envoi email + QR-facture)
 register_document_routes(app, LOGO_SVF, BREVO_API_KEY)
+register_bons_cadeaux_routes(app, LOGO_SVF, BREVO_API_KEY)
 register_dossier_routes(app)
 register_accueil_routes(app, convert_to_pdf, BREVO_API_KEY)
 register_anniversaires_routes(app, BREVO_API_KEY)
