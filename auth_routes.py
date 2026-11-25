@@ -305,7 +305,7 @@ def register_auth_routes(app):
         except Exception:
             return jsonify(ok=False, probleme='Table comptes_mdp absente : lancer le SQL de la phase 1'), 200
         tok = creer_jeton('admin', {'login': '__test__'})
-        r = requests.get(f'{SB_URL}/rest/v1/admins', params={'select': 'login', 'limit': '1'},
+        r = requests.get(f'{SB_URL}/rest/v1/parametres_rh', params={'select': 'id', 'limit': '1'},
                          headers={'apikey': _cle(), 'Authorization': f'Bearer {tok}'}, timeout=20)
         if r.status_code == 401:
             return jsonify(ok=False, probleme='Supabase refuse le jeton : SUPABASE_JWT_SECRET incorrect'), 200
